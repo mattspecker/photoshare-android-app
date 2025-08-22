@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/photoshare_main_background">
+
+
+    <!-- Event Info -->
+    <LinearLayout
+        android:id="@+id/layout_event_info"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp"
+        android:background="#1F1B2E">
+
+        <TextView
+            android:id="@+id/tv_event_name"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Event Name"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="#C084FC" />
+
+        <TextView
+            android:id="@+id/tv_event_dates"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Event Dates"
+            android:textSize="14sp"
+            android:textColor="#D1D5DB"
+            android:layout_marginTop="4dp" />
+
+        <!-- Photo Count Info -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="8dp">
+
+            <TextView
+                android:id="@+id/tv_photo_count"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="0 photos"
+                android:textSize="13sp"
+                android:textColor="#9CA3AF" />
+
+            <TextView
+                android:id="@+id/tv_selected_count"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0 selected"
+                android:textSize="13sp"
+                android:textColor="#4F9BFF" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <!-- Photo Grid -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recycler_photos"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:padding="8dp"
+        android:clipToPadding="false"
+        app:layoutManager="androidx.recyclerview.widget.GridLayoutManager"
+        app:spanCount="3" />
+
+    <!-- Bottom Buttons -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="16dp"
+        android:background="#1A1A1F"
+        android:elevation="4dp">
+
+        <Button
+            android:id="@+id/btn_cancel"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:text="Cancel"
+            android:textColor="#9CA3AF"
+            android:background="@android:color/transparent"
+            android:layout_marginEnd="8dp"
+            style="?android:attr/borderlessButtonStyle" />
+
+        <Button
+            android:id="@+id/btn_select"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:text="Select Photos"
+            android:textColor="#FAFAFA"
+            android:background="@drawable/photoshare_button_selector"
+            android:layout_marginStart="8dp"
+            android:enabled="false" />
+
+    </LinearLayout>
+
+</LinearLayout>

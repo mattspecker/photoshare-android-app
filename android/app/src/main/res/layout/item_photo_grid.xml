@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="120dp"
+    android:layout_margin="4dp"
+    android:background="@drawable/photoshare_photo_card">
+
+    <!-- Photo ImageView -->
+    <ImageView
+        android:id="@+id/iv_photo"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_margin="2dp"
+        android:scaleType="centerCrop"
+        android:background="@drawable/photoshare_photo_background" />
+
+    <!-- Selection Overlay -->
+    <View
+        android:id="@+id/view_selection_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/photoshare_selection_overlay"
+        android:visibility="gone" />
+
+    <!-- Upload Status Indicator -->
+    <ImageView
+        android:id="@+id/iv_upload_status"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:layout_gravity="top|end"
+        android:layout_margin="8dp"
+        android:background="@drawable/photoshare_upload_indicator"
+        android:visibility="gone" />
+
+    <!-- Selection Indicator (small circle) -->
+    <View
+        android:id="@+id/view_selection_indicator"
+        android:layout_width="16dp"
+        android:layout_height="16dp"
+        android:layout_gravity="top|end"
+        android:layout_margin="8dp"
+        android:background="@drawable/photoshare_selection_indicator"
+        android:visibility="gone" />
+
+    <!-- Photo Info Overlay -->
+    <LinearLayout
+        android:id="@+id/layout_photo_info"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:orientation="vertical"
+        android:background="#80000000"
+        android:padding="4dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/tv_photo_name"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Photo Name"
+            android:textSize="10sp"
+            android:textColor="#FFFFFF"
+            android:maxLines="1"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/tv_photo_date"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Date"
+            android:textSize="9sp"
+            android:textColor="#CCCCCC" />
+
+    </LinearLayout>
+
+</FrameLayout>

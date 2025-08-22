@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PhotoShare</string>
+    <string name="title_activity_main">PhotoShare</string>
+    <string name="package_name">app.photoshare</string>
+    <string name="custom_url_scheme">app.photoshare</string>
+    <string name="google_oauth_client_id">768724539114-n3btd9e82cnoq2p3gplt0uiqi7vilnr9.apps.googleusercontent.com</string>
+</resources>

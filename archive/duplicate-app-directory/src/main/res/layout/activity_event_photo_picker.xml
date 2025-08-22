@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#FFFFFF">
+
+    <!-- Header -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp"
+        android:background="#F5F5F5">
+
+        <TextView
+            android:id="@+id/title_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Select photos for event"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="#333333"
+            android:gravity="center" />
+
+        <TextView
+            android:id="@+id/selection_count_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="No photos selected"
+            android:textSize="14sp"
+            android:textColor="#666666"
+            android:gravity="center"
+            android:layout_marginTop="4dp" />
+
+    </LinearLayout>
+
+    <!-- Photos Grid -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/photos_recycler_view"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:padding="4dp"
+        android:background="#FFFFFF" />
+
+    <!-- Bottom Buttons -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="16dp"
+        android:background="#F5F5F5">
+
+        <Button
+            android:id="@+id/cancel_button"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Cancel"
+            android:textColor="#666666"
+            android:background="@android:drawable/btn_default"
+            android:layout_marginEnd="8dp" />
+
+        <Button
+            android:id="@+id/select_button"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Select Photos"
+            android:textColor="#FFFFFF"
+            android:background="#007AFF"
+            android:layout_marginStart="8dp"
+            android:enabled="false" />
+
+    </LinearLayout>
+
+</LinearLayout>

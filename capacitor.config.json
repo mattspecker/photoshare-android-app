@@ -1,0 +1,51 @@
+{
+  "appId": "app.photoshare",
+  "appName": "PhotoShare",
+  "webDir": "www",
+  "server": {
+    "url": "https://photo-share.app",
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": true,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": true
+  },
+  "plugins": {
+    "Device": {
+      "permissions": ["android.permission.READ_PHONE_STATE"]
+    },
+    "Camera": {
+      "permissions": ["camera", "photos"]
+    },
+    "BarcodeScanning": {
+      "cameraDirection": "back"
+    },
+    "FirebaseAuthentication": {
+      "skipNativeAuth": false,
+      "providers": ["google.com"]
+    },
+    "SafeArea": {
+      "enabled": true,
+      "customColorsForSystemBars": true,
+      "statusBarColor": "#00000000",
+      "statusBarContent": "light",
+      "navigationBarColor": "#00000000",
+      "navigationBarContent": "light",
+      "offset": 0
+    },
+    "SplashScreen": {
+      "launchShowDuration": 2000,
+      "launchAutoHide": true,
+      "backgroundColor": "#1a1d29",
+      "androidSplashResourceName": "splash",
+      "androidScaleType": "CENTER_CROP",
+      "showSpinner": false,
+      "androidSpinnerStyle": "large",
+      "iosSpinnerStyle": "small",
+      "spinnerColor": "#999999",
+      "splashFullScreen": true,
+      "splashImmersive": true
+    }
+  }
+}

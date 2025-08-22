@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "1064591086523",
+    "project_id": "photoshare-a70ea",
+    "storage_bucket": "photoshare-a70ea.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1064591086523:android:4524f0abb10089cbf2aa9e",
+        "android_client_info": {
+          "package_name": "app.photoshare"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1064591086523-i1gvc81ebkn79iuoj5jv9enr1qqgg400.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBR2yv_fS7uWxqPIBuHRdBmnURDYSqWkgA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1064591086523-i1gvc81ebkn79iuoj5jv9enr1qqgg400.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "1064591086523-02pv6uol5nsvc953mkkgrqcajpp1po77.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.photoshare.photo-share"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

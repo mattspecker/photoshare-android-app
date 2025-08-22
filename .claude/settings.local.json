@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cp:*)",
+      "Bash(export:*)",
+      "Bash(./gradlew:*)",
+      "Bash(sips:*)"
+    ],
+    "deny": []
+  }
+}
