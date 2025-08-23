@@ -8,7 +8,9 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
 import android.provider.Settings;
+import android.webkit.ValueCallback;
 import android.util.Log;
 import android.database.Cursor;
 import android.provider.MediaStore;
@@ -41,6 +43,12 @@ import com.getcapacitor.annotation.CapacitorPlugin;
     }
 )
 public class EventPhotoPickerPlugin extends Plugin {
+
+    @Override
+    public void load() {
+        super.load();
+        Log.d("EventPhotoPicker", "🔥 EventPhotoPicker Plugin Loading");
+    }
 
     @PluginMethod
     public void testPlugin(PluginCall call) {
@@ -448,8 +456,8 @@ public class EventPhotoPickerPlugin extends Plugin {
 
     @PluginMethod
     public void openEventPhotoPicker(PluginCall call) {
-        Log.d("EventPhotoPicker", "=== OPEN EVENT PHOTO PICKER CALLED ===");
-        Log.d("EventPhotoPicker", "Plugin is working and method was called successfully");
+        Log.d("EventPhotoPicker", "🔥🔥🔥 === OPEN EVENT PHOTO PICKER CALLED === 🔥🔥🔥");
+        Log.d("EventPhotoPicker", "🔥🔥🔥 Plugin is working and method was called successfully! 🔥🔥🔥");
         Log.d("EventPhotoPicker", "Call data: " + call.getData().toString());
         
         // Stage 5: Check permissions first
@@ -615,101 +623,117 @@ public class EventPhotoPickerPlugin extends Plugin {
                 Log.d("EventPhotoPicker", "🚀 Testing JWT token function");
                 
                 String jsCode = 
-                    "console.log('🔥 ===== TESTING JWT TOKEN FOR EVENTPHOTOPICKER =====');" +
+                    "console.log('🔥 ===== STARTING EXTENDED JWT TOKEN TEST FOR EVENTPHOTOPICKER =====');" +
                     "" +
-                    "(async function() {" +
-                    "  let diagnosticText = '🔥 EventPhotoPicker JWT Test\\\\n\\\\n';" +
-                    "  diagnosticText += '📡 Event ID: " + returnedEventId + "\\\\n';" +
-                    "  diagnosticText += '📷 Selected Photos: " + selectedCount + "\\\\n';" +
-                    "  diagnosticText += '⏰ Test Time: ' + new Date().toLocaleString() + '\\\\n\\\\n';" +
+                    "(function() {" +
+                    "  console.log('🔥 JWT Test - Event: " + returnedEventId + ", Photos: " + selectedCount + "');" +
+                    "  console.log('🔥 Current URL:', window.location.href);" +
+                    "  console.log('🔥 Current Time:', new Date().toISOString());" +
                     "  " +
-                    "  // Test JWT token function" +
-                    "  diagnosticText += '🔐 Testing JWT Token Function...\\\\n';" +
-                    "  " +
-                    "  if (typeof window.getJwtTokenForNativePlugin === 'function') {" +
-                    "    diagnosticText += '✅ getJwtTokenForNativePlugin function exists\\\\n';" +
-                    "    try {" +
-                    "      console.log('🔥 Calling window.getJwtTokenForNativePlugin()...');" +
-                    "      const jwtToken = await window.getJwtTokenForNativePlugin();" +
-                    "      " +
-                    "      if (jwtToken) {" +
-                    "        diagnosticText += '✅ JWT Token Retrieved Successfully!\\\\n';" +
-                    "        diagnosticText += 'Token Length: ' + jwtToken.length + ' characters\\\\n';" +
-                    "        diagnosticText += 'Token Preview: ' + jwtToken.substring(0, 50) + '...\\\\n';" +
-                    "        " +
-                    "        // Try to decode JWT header to show basic info" +
-                    "        try {" +
-                    "          const parts = jwtToken.split('.');" +
-                    "          if (parts.length === 3) {" +
-                    "            const header = JSON.parse(atob(parts[0]));" +
-                    "            const payload = JSON.parse(atob(parts[1]));" +
-                    "            diagnosticText += 'JWT Algorithm: ' + (header.alg || 'Unknown') + '\\\\n';" +
-                    "            diagnosticText += 'JWT Type: ' + (header.typ || 'Unknown') + '\\\\n';" +
-                    "            if (payload.email) {" +
-                    "              diagnosticText += 'User Email: ' + payload.email + '\\\\n';" +
-                    "            }" +
-                    "            if (payload.exp) {" +
-                    "              const expDate = new Date(payload.exp * 1000);" +
-                    "              diagnosticText += 'Expires: ' + expDate.toLocaleString() + '\\\\n';" +
-                    "            }" +
-                    "          }" +
-                    "        } catch (decodeError) {" +
-                    "          diagnosticText += 'JWT Decode Error: ' + decodeError.message + '\\\\n';" +
-                    "        }" +
-                    "      } else {" +
-                    "        diagnosticText += '❌ JWT Token is null or empty\\\\n';" +
-                    "      }" +
-                    "    } catch (jwtError) {" +
-                    "      diagnosticText += '❌ JWT Error: ' + jwtError.message + '\\\\n';" +
-                    "      console.error('🔥 JWT Error:', jwtError);" +
-                    "    }" +
-                    "  } else {" +
-                    "    diagnosticText += '❌ getJwtTokenForNativePlugin function not found\\\\n';" +
-                    "    diagnosticText += 'Available window functions: ' + Object.keys(window).filter(k => k.includes('jwt') || k.includes('Jwt') || k.includes('JWT') || k.includes('Token') || k.includes('token')).join(', ') + '\\\\n';" +
-                    "  }" +
-                    "  " +
-                    "  // Test other PhotoShare native functions" +
-                    "  diagnosticText += '\\\\n📱 Testing Other Native Functions...\\\\n';" +
-                    "  " +
-                    "  if (typeof window.uploadFromNativePlugin === 'function') {" +
-                    "    diagnosticText += '✅ uploadFromNativePlugin function exists\\\\n';" +
-                    "  } else {" +
-                    "    diagnosticText += '❌ uploadFromNativePlugin function not found\\\\n';" +
-                    "  }" +
-                    "  " +
-                    "  if (typeof window.getNativeAuthHeaders === 'function') {" +
-                    "    diagnosticText += '✅ getNativeAuthHeaders function exists\\\\n';" +
-                    "  } else {" +
-                    "    diagnosticText += '❌ getNativeAuthHeaders function not found\\\\n';" +
-                    "  }" +
-                    "  " +
-                    "  // Test Supabase availability" +
-                    "  diagnosticText += '\\\\n🗄️ Testing Supabase...\\\\n';" +
+                    "  // First check Supabase availability" +
                     "  if (window.supabase) {" +
-                    "    diagnosticText += '✅ Supabase client available\\\\n';" +
-                    "    try {" +
-                    "      const { data: { session } } = await window.supabase.auth.getSession();" +
+                    "    console.log('🔥 ✅ Supabase client found!');" +
+                    "    " +
+                    "    // Test direct getSession call to see what we get" +
+                    "    console.log('🔥 Testing direct supabase.auth.getSession() call...');" +
+                    "    window.supabase.auth.getSession().then(function(response) {" +
+                    "      console.log('🔥 🔍 Direct getSession() response:', response);" +
+                    "      " +
+                    "      var session = response.data ? response.data.session : null;" +
+                    "      var error = response.error;" +
+                    "      " +
+                    "      var diagText = '🔍 SUPABASE SESSION DIAGNOSIS:\\\\n\\\\n';" +
+                    "      diagText += 'Response type: ' + typeof response + '\\\\n';" +
+                    "      diagText += 'Has data: ' + (response.data ? 'YES' : 'NO') + '\\\\n';" +
+                    "      diagText += 'Has error: ' + (error ? 'YES - ' + error.message : 'NO') + '\\\\n';" +
+                    "      diagText += 'Session exists: ' + (session ? 'YES' : 'NO') + '\\\\n';" +
+                    "      " +
                     "      if (session) {" +
-                    "        diagnosticText += '✅ Active session: ' + (session.user?.email || 'Unknown') + '\\\\n';" +
+                    "        diagText += 'User ID: ' + (session.user ? session.user.id : 'No user') + '\\\\n';" +
+                    "        diagText += 'User Email: ' + (session.user ? session.user.email : 'No email') + '\\\\n';" +
+                    "        diagText += 'Access Token: ' + (session.access_token ? 'EXISTS (' + session.access_token.length + ' chars)' : 'MISSING') + '\\\\n';" +
+                    "        diagText += 'Token Preview: ' + (session.access_token ? session.access_token.substring(0, 40) + '...' : 'N/A') + '\\\\n';" +
+                    "        diagText += 'Expires At: ' + (session.expires_at ? new Date(session.expires_at * 1000).toLocaleString() : 'N/A') + '\\\\n';" +
                     "      } else {" +
-                    "        diagnosticText += '❌ No active session\\\\n';" +
+                    "        diagText += 'Session is null/undefined\\\\n';" +
                     "      }" +
-                    "    } catch (supabaseError) {" +
-                    "      diagnosticText += '❌ Supabase session error: ' + supabaseError.message + '\\\\n';" +
-                    "    }" +
+                    "      " +
+                    "      console.log('🔥 Session diagnosis:', diagText);" +
+                    "      alert('🔍 SUPABASE SESSION CHECK:\\\\n\\\\n' + diagText);" +
+                    "      " +
+                    "    }).catch(function(sessionError) {" +
+                    "      console.log('🔥 ❌ Direct getSession() error:', sessionError);" +
+                    "      alert('❌ Direct getSession() Error: ' + sessionError.message);" +
+                    "    });" +
+                    "    " +
                     "  } else {" +
-                    "    diagnosticText += '❌ Supabase not available\\\\n';" +
+                    "    console.log('🔥 ❌ Supabase client NOT found!');" +
+                    "    alert('❌ Supabase client not available!');" +
                     "  }" +
                     "  " +
-                    "  console.log('🔥 ===== JWT TEST COMPLETE =====');" +
-                    "  console.log(diagnosticText);" +
+                    "  // Now test the JWT function after a delay" +
+                    "  setTimeout(function() {" +
+                    "    console.log('🔥 Testing getJwtTokenForNativePlugin after delay...');" +
+                    "    " +
+                    "    if (typeof window.getJwtTokenForNativePlugin === 'function') {" +
+                    "      console.log('🔥 ✅ getJwtTokenForNativePlugin function found!');" +
+                    "      " +
+                    "      try {" +
+                    "        console.log('🔥 Calling getJwtTokenForNativePlugin()...');" +
+                    "        var jwtResult = window.getJwtTokenForNativePlugin();" +
+                    "        console.log('🔥 JWT function result type:', typeof jwtResult);" +
+                    "        " +
+                    "        if (jwtResult && typeof jwtResult.then === 'function') {" +
+                    "          console.log('🔥 JWT returned promise, setting up 100s timeout...');" +
+                    "          " +
+                    "          // Set up a 100-second timeout" +
+                    "          var timeoutId = setTimeout(function() {" +
+                    "            console.log('🔥 ⏰ JWT Promise timeout after 100 seconds');" +
+                    "            alert('⏰ JWT Promise timed out after 100 seconds');" +
+                    "          }, 100000);" +
+                    "          " +
+                    "          jwtResult.then(function(token) {" +
+                    "            clearTimeout(timeoutId);" +
+                    "            console.log('🔥 🎉 JWT PROMISE RESOLVED after delay!');" +
+                    "            " +
+                    "            if (token) {" +
+                    "              console.log('🔥 JWT Token length:', token.length);" +
+                    "              console.log('🔥 JWT Token preview:', token.substring(0, 50) + '...');" +
+                    "              " +
+                    "              try {" +
+                    "                var parts = token.split('.');" +
+                    "                if (parts.length === 3) {" +
+                    "                  var payload = JSON.parse(atob(parts[1]));" +
+                    "                  console.log('🔥 JWT User:', payload.email || 'Not found');" +
+                    "                  alert('🎉 JWT SUCCESS AFTER DELAY!\\\\n\\\\nToken Length: ' + token.length + '\\\\nUser: ' + (payload.email || 'Unknown'));" +
+                    "                }" +
+                    "              } catch (parseError) {" +
+                    "                alert('🎉 JWT SUCCESS!\\\\n\\\\nToken Length: ' + token.length + '\\\\n(Parse failed)');" +
+                    "              }" +
+                    "            } else {" +
+                    "              console.log('🔥 ❌ JWT token is null after delay');" +
+                    "              alert('❌ JWT token is null after delay');" +
+                    "            }" +
+                    "          }).catch(function(error) {" +
+                    "            clearTimeout(timeoutId);" +
+                    "            console.log('🔥 ❌ JWT Promise rejected after delay:', error);" +
+                    "            alert('❌ JWT Error after delay: ' + error.message);" +
+                    "          });" +
+                    "        } else {" +
+                    "          console.log('🔥 JWT returned direct result:', jwtResult);" +
+                    "          alert('🎉 JWT Direct Result: ' + (jwtResult || 'null'));" +
+                    "        }" +
+                    "      } catch (error) {" +
+                    "        console.log('🔥 ❌ Error calling JWT function:', error);" +
+                    "        alert('❌ JWT Function Error: ' + error.message);" +
+                    "      }" +
+                    "    } else {" +
+                    "      console.log('🔥 ❌ getJwtTokenForNativePlugin function not found');" +
+                    "      alert('❌ getJwtTokenForNativePlugin function not found');" +
+                    "    }" +
+                    "  }, 2000); // 2 second delay before calling JWT function" +
                     "  " +
-                    "  // Show diagnostics in alert" +
-                    "  try {" +
-                    "    alert(diagnosticText);" +
-                    "  } catch (alertError) {" +
-                    "    console.log('Alert failed:', alertError.message);" +
-                    "  }" +
+                    "  return 'EXTENDED_JWT_TEST_STARTED';" +
                     "})();";
                 
                 Log.d("EventPhotoPicker", "🚀 Executing JavaScript code with retry logic...");

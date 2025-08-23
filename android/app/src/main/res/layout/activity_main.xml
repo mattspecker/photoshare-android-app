@@ -10,4 +10,18 @@
     <WebView
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
+
+    <!-- JWT Test Button - Centered, Red, 100x100dp -->
+    <Button
+        android:id="@+id/jwt_test_button"
+        android:layout_width="100dp"
+        android:layout_height="100dp"
+        android:layout_gravity="center"
+        android:text="🔐 JWT"
+        android:textSize="12sp"
+        android:textColor="#FFFFFF"
+        android:backgroundTint="#FF0000"
+        android:elevation="10dp"
+        android:translationZ="10dp" />
+
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
