@@ -11,7 +11,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- JWT Test Button - Centered, Red, 100x100dp -->
+    <!-- JWT Test Button - to test web team's new JWT functions -->
     <Button
         android:id="@+id/jwt_test_button"
         android:layout_width="100dp"

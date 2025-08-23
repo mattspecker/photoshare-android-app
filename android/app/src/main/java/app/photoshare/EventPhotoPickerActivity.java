@@ -2,8 +2,10 @@ package app.photoshare;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.provider.MediaStore;
@@ -22,6 +24,9 @@ import android.webkit.ValueCallback;
 import android.webkit.WebSettings;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -252,16 +257,13 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
     private void processSelectedPhotos(List<PhotoItem> selectedPhotos) {
         Log.d(TAG, "Processing " + selectedPhotos.size() + " selected photos");
         
-        // JWT test was already handled when EventPhotoPicker loaded
-        Log.d(TAG, "🔥 JWT test was completed when EventPhotoPicker started");
+        // CHANGED: EventPhotoPicker now performs actual uploads instead of just returning photos
+        Log.d(TAG, "🔥 Starting actual photo upload process");
+        Log.d(TAG, "=== EVENTPHOTOPICKER UPLOADING PHOTOS ===");
+        Log.d(TAG, "Uploading " + selectedPhotos.size() + " photos directly from EventPhotoPicker");
         
-        // IMPORTANT: EventPhotoPicker now just returns selected photos
-        // The actual upload will be handled by UploadManager plugin in JavaScript layer
-        Log.d(TAG, "=== EVENTPHOTOPICKER RETURNING PHOTOS ===");
-        Log.d(TAG, "Returning " + selectedPhotos.size() + " photos to JavaScript for UploadManager processing");
-        
-        // Simply return the selected photos without uploading
-        returnSelectedPhotos(selectedPhotos);
+        // Call the actual upload method
+        continueWithPhotoProcessing(selectedPhotos);
     }
     
     private void returnSelectedPhotos(List<PhotoItem> selectedPhotos) {
@@ -436,82 +438,828 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
     
     
     private void testJwtTokenFunctionWithPhotos(List<PhotoItem> selectedPhotos) {
-        Log.d(TAG, "🔥 EventPhotoPicker Activity completed - use main JWT Test Button instead");
-        Log.d(TAG, "🔥 JWT testing has been moved to the floating button in MainActivity for direct access");
+        Log.d(TAG, "🔥 Checking JWT token from automatic monitoring for " + selectedPhotos.size() + " photos");
         
-        // Simple message directing user to main JWT test
-        String jsResult = "{" +
-            "\"message\": \"JWT testing has been simplified\"," +
-            "\"instruction\": \"Use the 🔐 JWT Test button in the top-right corner for direct token testing\"," +
-            "\"photoCount\": " + selectedPhotos.size() + "," +
-            "\"timestamp\": \"" + new java.util.Date().toString() + "\"," +
-            "\"note\": \"This provides direct access to the main WebView authentication context\"" +
-            "}";
+        // Get JWT token from SharedPreferences (stored by automatic monitoring)
+        String token = getSharedPreferences("photoshare", MODE_PRIVATE)
+            .getString("current_jwt_token", null);
+        long savedAt = getSharedPreferences("photoshare", MODE_PRIVATE)
+            .getLong("token_saved_at", 0);
+        String tokenSource = getSharedPreferences("photoshare", MODE_PRIVATE)
+            .getString("token_source", "unknown");
         
-        // Show simple dialog
-        showJwtTestResultsWithPhotos(jsResult, selectedPhotos);
-    }
-    
-    private void showJwtTestResultsWithPhotos(String jsResult, List<PhotoItem> selectedPhotos) {
-        Log.d(TAG, "🔥 Showing simplified dialog directing to main JWT test");
+        // Create verification result
+        StringBuilder result = new StringBuilder();
+        result.append("🔐 JWT TOKEN VERIFICATION\n\n");
+        result.append("📷 Selected Photos: ").append(selectedPhotos.size()).append("\n");
+        result.append("🎯 Event: ").append(eventName).append(" (").append(eventId).append(")\n\n");
         
-        String dialogMessage = "📷 PHOTOS SELECTED: " + selectedPhotos.size() + "\\n\\n";
-        
-        if (jsResult != null) {
-            String cleanResult = jsResult.replace("\\\"", "\"").replace("\\\\", "\\");
-            if (cleanResult.startsWith("\"") && cleanResult.endsWith("\"")) {
-                cleanResult = cleanResult.substring(1, cleanResult.length() - 1);
+        if (token != null && !token.isEmpty()) {
+            // Calculate token age
+            long tokenAge = System.currentTimeMillis() - savedAt;
+            long ageMinutes = tokenAge / (1000 * 60);
+            long ageSeconds = (tokenAge / 1000) % 60;
+            
+            result.append("✅ JWT TOKEN FOUND!\n");
+            result.append("   Length: ").append(token.length()).append(" characters\n");
+            result.append("   Preview: ").append(token.substring(0, Math.min(50, token.length()))).append("...\n");
+            result.append("   Source: ").append(tokenSource).append("\n");
+            result.append("   Age: ").append(ageMinutes).append("m ").append(ageSeconds).append("s\n");
+            result.append("   Saved: ").append(new Date(savedAt)).append("\n\n");
+            
+            // Try to decode JWT to show user info
+            try {
+                String[] parts = token.split("\\.");
+                if (parts.length == 3) {
+                    String payload = new String(Base64.decode(parts[1], Base64.DEFAULT));
+                    if (payload.contains("\"email\"")) {
+                        // Extract email with simple regex
+                        String email = extractEmailFromJwt(payload);
+                        if (email != null) {
+                            result.append("👤 User: ").append(email).append("\n");
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                Log.d(TAG, "Could not decode JWT payload: " + e.getMessage());
             }
-            dialogMessage += cleanResult + "\\n\\n";
+            
+            result.append("\n🚀 Ready to proceed with photo upload!");
+        } else {
+            result.append("❌ NO JWT TOKEN FOUND\n");
+            result.append("   Status: Not authenticated\n");
+            result.append("   Reason: Token not captured by monitoring\n\n");
+            result.append("⚠️ Cannot proceed with upload without authentication.");
         }
         
-        dialogMessage += "Use the 🔐 JWT Test button in the top-right corner for direct JWT token testing!";
+        Log.d(TAG, "JWT Token Status: " + (token != null ? "AVAILABLE (length: " + token.length() + ")" : "NOT AVAILABLE"));
         
-        new AlertDialog.Builder(this)
-            .setTitle("🔥 JWT Token Test Results")
-            .setMessage(dialogMessage)
-            .setPositiveButton("Continue with Photos", (dialog, which) -> {
-                Log.d(TAG, "🔥 JWT test dialog dismissed - continuing with photo processing");
+        // Show verification dialog
+        showJwtTokenVerificationDialog(result.toString(), selectedPhotos, token != null);
+    }
+    
+    private String extractEmailFromJwt(String payload) {
+        try {
+            // Simple email extraction from JWT payload
+            String emailPattern = "\"email\"\\s*:\\s*\"([^\"]+)\"";
+            java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(emailPattern);
+            java.util.regex.Matcher matcher = pattern.matcher(payload);
+            if (matcher.find()) {
+                return matcher.group(1);
+            }
+        } catch (Exception e) {
+            Log.d(TAG, "Email extraction failed: " + e.getMessage());
+        }
+        return null;
+    }
+    
+    private void showJwtTokenVerificationDialog(String verificationResult, List<PhotoItem> selectedPhotos, boolean hasToken) {
+        Log.d(TAG, "🔐 Showing JWT token verification dialog");
+        
+        AlertDialog.Builder builder = new AlertDialog.Builder(this)
+            .setTitle("🔐 JWT Token Verification")
+            .setMessage(verificationResult)
+            .setCancelable(false);
+        
+        if (hasToken) {
+            builder.setPositiveButton("Proceed with Upload", (dialog, which) -> {
+                Log.d(TAG, "✅ JWT token verified - proceeding with photo upload");
                 dialog.dismiss();
-                // Continue with the original photo processing
-                continueWithPhotoProcessing(selectedPhotos);
-            })
-            .setNegativeButton("Cancel", (dialog, which) -> {
-                Log.d(TAG, "🔥 JWT test dialog cancelled");
+                
+                // Try to get fresh JWT token from chunking first
+                SharedPreferences prefs = getSharedPreferences("photoshare", MODE_PRIVATE);
+                String freshToken = prefs.getString("fresh_jwt_token", null);
+                long freshTokenTime = prefs.getLong("fresh_token_timestamp", 0);
+                
+                String sharedPrefsToken = null;
+                
+                // Check if we have a recent fresh token (within last 5 minutes)
+                if (freshToken != null && (System.currentTimeMillis() - freshTokenTime) < 300000) {
+                    Log.d(TAG, "✅ Using fresh JWT token from chunking (length: " + freshToken.length() + ", age: " + ((System.currentTimeMillis() - freshTokenTime) / 1000) + "s)");
+                    sharedPrefsToken = freshToken;
+                } else {
+                    // Fallback to monitoring token
+                    sharedPrefsToken = prefs.getString("current_jwt_token", null);
+                    Log.d(TAG, "🔄 Using fallback JWT from monitoring SharedPreferences: " + (sharedPrefsToken != null ? sharedPrefsToken.length() + " chars" : "null"));
+                }
+                
+                if (sharedPrefsToken != null && !sharedPrefsToken.isEmpty()) {
+                    Log.d(TAG, "✅ Using SharedPreferences JWT token for upload (length: " + sharedPrefsToken.length() + ")");
+                    
+                    // Show upload progress dialog
+                    showUploadProgressDialog(selectedPhotos.size());
+                    
+                    // Start upload with SharedPreferences token
+                    startUploadProcess(selectedPhotos, sharedPrefsToken);
+                } else {
+                    Log.e(TAG, "❌ No JWT token in SharedPreferences, falling back to normal flow");
+                    continueWithPhotoProcessing(selectedPhotos);
+                }
+            });
+            builder.setNegativeButton("Cancel", (dialog, which) -> {
+                Log.d(TAG, "❌ User cancelled after token verification");
                 dialog.dismiss();
                 finish();
-            })
-            .setCancelable(false) // Prevent dismissing without button
-            .show();
+            });
+        } else {
+            builder.setPositiveButton("Try Again Later", (dialog, which) -> {
+                Log.d(TAG, "⚠️ No token available - user will try again later");
+                dialog.dismiss();
+                Toast.makeText(this, "Please ensure you're logged into PhotoShare and try again", Toast.LENGTH_LONG).show();
+                finish();
+            });
+            builder.setNegativeButton("Cancel", (dialog, which) -> {
+                Log.d(TAG, "❌ User cancelled due to no token");
+                dialog.dismiss();
+                finish();
+            });
+        }
+        
+        builder.show();
     }
     
     private void continueWithPhotoProcessing(List<PhotoItem> selectedPhotos) {
-        Log.d(TAG, "🔥 Continuing with photo processing after JWT test");
+        Log.d(TAG, "🔥 Starting actual photo upload process with " + selectedPhotos.size() + " photos");
         
-        // Prepare photo URIs to return
-        ArrayList<String> photoUris = new ArrayList<>();
-        ArrayList<String> photoNames = new ArrayList<>();
-        ArrayList<Long> photoIds = new ArrayList<>();
-
-        for (PhotoItem photo : selectedPhotos) {
-            photoUris.add(photo.getUri().toString());
-            photoNames.add(photo.getDisplayName());
-            photoIds.add(photo.getId());
-            Log.d(TAG, "Selected: " + photo.getDisplayName() + " (URI: " + photo.getUri() + ")");
+        // CHANGED: Try chunked JWT token FIRST (highest priority)
+        SharedPreferences prefs = getSharedPreferences("photoshare", MODE_PRIVATE);
+        String freshToken = prefs.getString("fresh_jwt_token", null);
+        long freshTokenTime = prefs.getLong("fresh_token_timestamp", 0);
+        
+        String jwtToken = null;
+        
+        // DEBUG: Show all available tokens
+        Log.d(TAG, "🔍 TOKEN DEBUG - Available tokens:");
+        Log.d(TAG, "🔍 Fresh token: " + (freshToken != null ? freshToken.length() + " chars" : "null"));
+        Log.d(TAG, "🔍 Fresh token timestamp: " + freshTokenTime + " (age: " + (freshTokenTime > 0 ? (System.currentTimeMillis() - freshTokenTime) / 1000 + "s" : "never") + ")");
+        
+        String monitoringToken = prefs.getString("current_jwt_token", null);
+        Log.d(TAG, "🔍 Monitoring token: " + (monitoringToken != null ? monitoringToken.length() + " chars" : "null"));
+        
+        // STRICT CHUNKED TOKEN PRIORITY: Only use fresh chunked tokens first
+        if (freshToken != null && (System.currentTimeMillis() - freshTokenTime) < 300000) {
+            Log.d(TAG, "✅ Using fresh JWT token from chunked transfer (length: " + freshToken.length() + ", age: " + ((System.currentTimeMillis() - freshTokenTime) / 1000) + "s)");
+            Log.d(TAG, "🔍 Fresh token preview: " + (freshToken.length() > 100 ? freshToken.substring(0, 50) + "..." + freshToken.substring(freshToken.length() - 50) : freshToken));
+            jwtToken = freshToken;
+        } else if (freshToken != null) {
+            Log.w(TAG, "⚠️ Fresh token exists but is older than 5 minutes (age: " + ((System.currentTimeMillis() - freshTokenTime) / 1000) + "s)");
+            Log.w(TAG, "⚠️ Falling back to monitoring token - upload may fail with expired token");
+            
+            // Only use monitoring token if it's significantly longer than truncated tokens
+            if (monitoringToken != null && monitoringToken.length() > 500) {
+                Log.d(TAG, "✅ Using monitoring JWT token from SharedPreferences (length: " + monitoringToken.length() + ")");
+                Log.d(TAG, "🔍 Monitoring token preview: " + (monitoringToken.length() > 100 ? monitoringToken.substring(0, 50) + "..." + monitoringToken.substring(monitoringToken.length() - 50) : monitoringToken));
+                jwtToken = monitoringToken;
+            } else {
+                Log.e(TAG, "❌ Monitoring token is too short (" + (monitoringToken != null ? monitoringToken.length() : 0) + " chars) - likely truncated");
+                Log.e(TAG, "❌ Please click the red button 🔐 first to get a fresh chunked token");
+            }
+        } else {
+            Log.w(TAG, "⚠️ No fresh chunked token available");
+            
+            // Only use monitoring token as absolute last resort and if it's long enough
+            if (monitoringToken != null && monitoringToken.length() > 500) {
+                Log.d(TAG, "✅ Using monitoring JWT token from SharedPreferences (length: " + monitoringToken.length() + ")");
+                Log.d(TAG, "🔍 Monitoring token preview: " + (monitoringToken.length() > 100 ? monitoringToken.substring(0, 50) + "..." + monitoringToken.substring(monitoringToken.length() - 50) : monitoringToken));
+                jwtToken = monitoringToken;
+            } else {
+                Log.e(TAG, "❌ Monitoring token is too short (" + (monitoringToken != null ? monitoringToken.length() : 0) + " chars) - likely truncated");
+                Log.e(TAG, "❌ Please click the red button 🔐 first to get a fresh chunked token");
+            }
         }
-
-        Log.d(TAG, "=== CALLING UPLOADMANAGER FOR DIAGNOSTICS ===");
         
-        // Return result
-        Intent resultIntent = new Intent();
-        resultIntent.putStringArrayListExtra("photo_uris", photoUris);
-        resultIntent.putStringArrayListExtra("photo_names", photoNames);
-        resultIntent.putExtra("photo_ids", photoIds.toArray(new Long[0]));
-        resultIntent.putExtra("selected_count", selectedPhotos.size());
-        resultIntent.putExtra("event_id", eventId);
-
-        // Set result and finish
-        setResult(Activity.RESULT_OK, resultIntent);
-        finish();
+        // Final check: If no good token found, try Intent as absolute last resort
+        if (jwtToken == null) {
+            Log.w(TAG, "⚠️ No valid JWT token from chunked or monitoring sources - trying Intent as last resort");
+            Intent intent = getIntent();
+            if (intent != null && intent.hasExtra("jwt_token")) {
+                String intentToken = intent.getStringExtra("jwt_token");
+                
+                if (intentToken != null && !intentToken.equals("NULL_TOKEN") && !intentToken.equals("ERROR_TOKEN") && !intentToken.equals("FUNCTION_NOT_FOUND") && intentToken.length() > 100) {
+                    Log.d(TAG, "⚠️ Using Intent JWT token as absolute last resort (length: " + intentToken.length() + ")");
+                    jwtToken = intentToken;
+                } else {
+                    Log.e(TAG, "❌ Intent JWT token is also invalid or truncated: " + (intentToken != null ? "'" + intentToken + "'" : "null"));
+                }
+            } else {
+                Log.e(TAG, "❌ No JWT token available from any source");
+            }
+        }
+        
+        if (jwtToken != null && jwtToken.length() > 100) {
+            Log.d(TAG, "📱 Using JWT token for upload (length: " + jwtToken.length() + ")");
+            Log.d(TAG, "🔍 TOKEN SOURCE DEBUG: About to pass token to startUploadProcess");
+            Log.d(TAG, "🔍 Token start: " + (jwtToken.length() > 50 ? jwtToken.substring(0, 50) : jwtToken));
+            Log.d(TAG, "🔍 Token end: " + (jwtToken.length() > 50 ? jwtToken.substring(jwtToken.length() - 50) : jwtToken));
+            
+            // Show upload progress dialog
+            showUploadProgressDialog(selectedPhotos.size());
+            
+            // Start upload with token
+            startUploadProcess(selectedPhotos, jwtToken);
+            return;
+        }
+        
+        // If no valid token found from any source
+        Log.e(TAG, "❌ No valid JWT token available from any source (chunked, monitoring, or Intent)");
+        showUploadError("Authentication token not available. Please click the red button first to get a fresh token, then try again.");
+    }
+    
+    private void startUploadProcess(List<PhotoItem> selectedPhotos, String jwtToken) {
+        Log.d(TAG, "🚀 Starting upload process for " + selectedPhotos.size() + " photos");
+        
+        totalUploadCount = selectedPhotos.size();
+        uploadedCount = 0;
+        
+        // Show JWT token dialog for debugging
+        String tokenPreview = jwtToken.length() > 40 ? 
+            jwtToken.substring(0, 20) + "..." + jwtToken.substring(jwtToken.length() - 20) : 
+            jwtToken;
+            
+        // Extract expiration time from JWT for display
+        String expirationInfo = "";
+        
+        // DEBUG: Log the token being parsed in the dialog
+        Log.d(TAG, "🔍 DIALOG DEBUG: Parsing JWT token for expiration display");
+        Log.d(TAG, "🔍 Token length: " + jwtToken.length());
+        Log.d(TAG, "🔍 Token preview: " + tokenPreview);
+        
+        try {
+            String[] parts = jwtToken.split("\\.");
+            if (parts.length == 3) {
+                String payload = new String(android.util.Base64.decode(parts[1], android.util.Base64.URL_SAFE | android.util.Base64.NO_PADDING));
+                if (payload.contains("\"exp\":")) {
+                    int expStart = payload.indexOf("\"exp\":") + 6;
+                    int expEnd = payload.indexOf(",", expStart);
+                    if (expEnd == -1) expEnd = payload.indexOf("}", expStart);
+                    String expStr = payload.substring(expStart, expEnd).trim();
+                    long exp = Long.parseLong(expStr);
+                    long now = System.currentTimeMillis() / 1000;
+                    
+                    // Convert to UTC ISO 8601 format
+                    java.text.SimpleDateFormat isoFormat = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
+                    isoFormat.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+                    
+                    String currentTimeISO = isoFormat.format(new java.util.Date(now * 1000));
+                    String expirationTimeISO = isoFormat.format(new java.util.Date(exp * 1000));
+                    
+                    if (exp < now) {
+                        long expiredSeconds = now - exp;
+                        expirationInfo = "\n⏰ Token Status: EXPIRED ❌\n" +
+                                       "Current Time: " + currentTimeISO + "\n" +
+                                       "Expired At: " + expirationTimeISO + "\n" +
+                                       "Expired: " + expiredSeconds + " seconds ago (" + (expiredSeconds / 60) + " min)\n";
+                    } else {
+                        long validSeconds = exp - now;
+                        expirationInfo = "\n⏰ Token Status: VALID ✅\n" +
+                                       "Current Time: " + currentTimeISO + "\n" +
+                                       "Expires At: " + expirationTimeISO + "\n" +
+                                       "Valid for: " + validSeconds + " seconds (" + (validSeconds / 60) + " min)\n";
+                    }
+                }
+            }
+        } catch (Exception e) {
+            expirationInfo = "\n⚠️ Could not parse token expiration\n";
+        }
+            
+        String dialogMessage = "🔍 EventPhotoPicker JWT Token Debug:\n\n" +
+                              "Token Length: " + jwtToken.length() + "\n" +
+                              "Token Preview: " + tokenPreview + 
+                              expirationInfo + "\n" +
+                              "Upload will start in 5 seconds...";
+        
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("🔐 JWT Token Debug")
+               .setMessage(dialogMessage)
+               .setPositiveButton("Start Upload Now", (dialog, which) -> {
+                   Log.d(TAG, "⚡ Starting upload immediately (user clicked)...");
+                   uploadNextPhoto(selectedPhotos, 0, jwtToken);
+               })
+               .setNegativeButton("Wait 5 sec", null)
+               .setCancelable(false);
+        
+        AlertDialog dialog = builder.create();
+        dialog.show();
+        
+        // Add 5 second delay so user can see JWT debug info in dialog
+        new android.os.Handler().postDelayed(() -> {
+            if (dialog.isShowing()) {
+                dialog.dismiss();
+                Log.d(TAG, "⏰ Starting upload after debug display delay...");
+                uploadNextPhoto(selectedPhotos, 0, jwtToken);
+            }
+        }, 5000); // 5 second delay
+    }
+    
+    private void startUploadProcessOld(List<PhotoItem> selectedPhotos) {
+        Log.d(TAG, "🚀 Starting upload process for " + selectedPhotos.size() + " photos");
+        
+        totalUploadCount = selectedPhotos.size();
+        uploadedCount = 0;
+        
+        Log.d(TAG, "🔄 Getting JWT token from Intent extras...");
+        
+        String jwtToken = null;
+        Intent intent = getIntent();
+        if (intent != null && intent.hasExtra("jwt_token")) {
+            jwtToken = intent.getStringExtra("jwt_token");
+            
+            if (jwtToken != null && !jwtToken.equals("NULL_TOKEN") && !jwtToken.equals("ERROR_TOKEN") && !jwtToken.equals("FUNCTION_NOT_FOUND")) {
+                String tokenPreview = jwtToken.length() > 20 ? 
+                    jwtToken.substring(0, 10) + "..." + jwtToken.substring(jwtToken.length() - 10) : 
+                    jwtToken;
+                Log.d(TAG, "✅ Valid JWT token found in Intent extras (length: " + jwtToken.length() + ", preview: " + tokenPreview + ")");
+            } else {
+                Log.e(TAG, "❌ Invalid JWT token in Intent extras: " + jwtToken);
+                jwtToken = null;
+            }
+        } else {
+            Log.e(TAG, "❌ No JWT token found in Intent extras");
+        }
+            
+        if (jwtToken == null) {
+            Log.e(TAG, "❌ No JWT token available for upload");
+            showUploadError("Authentication token not available. Please try again.");
+            return;
+        }
+        
+        Log.d(TAG, "🔄 Using fresh JWT token for upload (length: " + jwtToken.length() + ")");
+        
+        // Make jwtToken final for lambda
+        final String finalJwtToken = jwtToken;
+        
+        // Show JWT token dialog for debugging
+        String tokenPreview = jwtToken.length() > 40 ? 
+            jwtToken.substring(0, 20) + "..." + jwtToken.substring(jwtToken.length() - 20) : 
+            jwtToken;
+            
+        String dialogMessage = "🔍 EventPhotoPicker JWT Token Debug:\n\n" +
+                              "Token Length: " + jwtToken.length() + "\n" +
+                              "Token Preview: " + tokenPreview + "\n\n" +
+                              "Upload will start in 5 seconds...";
+        
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("🔐 JWT Token Debug")
+               .setMessage(dialogMessage)
+               .setPositiveButton("Start Upload Now", (dialog, which) -> {
+                   Log.d(TAG, "⚡ Starting upload immediately (user clicked)...");
+                   uploadNextPhoto(selectedPhotos, 0, finalJwtToken);
+               })
+               .setNegativeButton("Wait 5 sec", null)
+               .setCancelable(false);
+        
+        AlertDialog dialog = builder.create();
+        dialog.show();
+        
+        // Add 5 second delay so user can see JWT debug info in dialog
+        new android.os.Handler().postDelayed(() -> {
+            if (dialog.isShowing()) {
+                dialog.dismiss();
+                Log.d(TAG, "⏰ Starting upload after debug display delay...");
+                uploadNextPhoto(selectedPhotos, 0, finalJwtToken);
+            }
+        }, 5000); // 5 second delay
+    }
+    
+    private void showUploadProgressDialog(int totalPhotos) {
+        // Create progress dialog
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("📤 Uploading Photos");
+        
+        // Include eventId debug info in dialog
+        String message = "Preparing to upload " + totalPhotos + " photos...\n\n";
+        message += "🔍 Debug Info:\n";
+        message += "Event ID: " + (eventId != null ? eventId : "NULL") + "\n";
+        message += "Event Name: " + (eventName != null ? eventName : "NULL") + "\n\n";
+        
+        // Add JWT validation info
+        String jwtToken = getSharedPreferences("photoshare", MODE_PRIVATE)
+            .getString("current_jwt_token", null);
+        if (jwtToken != null) {
+            String[] jwtParts = jwtToken.split("\\.");
+            message += "🔐 JWT Info:\n";
+            message += "Parts: " + jwtParts.length + "/3\n";
+            message += "Starts with eyJ: " + (jwtToken.startsWith("eyJ") ? "✅" : "❌") + "\n";
+            message += "Length: " + jwtToken.length() + " chars\n";
+            if (jwtParts.length >= 2) {
+                // Show first 50 chars of payload (base64 decoded header info)
+                try {
+                    String header = new String(Base64.decode(jwtParts[0], Base64.DEFAULT));
+                    message += "Header: " + header.substring(0, Math.min(50, header.length())) + "...\n";
+                } catch (Exception e) {
+                    message += "Header: Invalid Base64\n";
+                }
+            }
+        } else {
+            message += "🔐 JWT: NOT FOUND";
+        }
+        
+        builder.setMessage(message);
+        builder.setCancelable(false);
+        
+        // You could add a progress bar here later
+        AlertDialog dialog = builder.create();
+        dialog.show();
+        
+        // Store dialog reference for updates
+        uploadProgressDialog = dialog;
+    }
+    
+    private AlertDialog uploadProgressDialog;
+    private int uploadedCount = 0;
+    private int totalUploadCount = 0;
+    
+    private void startPhotoUpload(List<PhotoItem> selectedPhotos) {
+        Log.d(TAG, "🚀 Starting upload process for " + selectedPhotos.size() + " photos");
+        
+        totalUploadCount = selectedPhotos.size();
+        uploadedCount = 0;
+        
+        // Get JWT token from Intent extras (passed from EventPhotoPickerPlugin)
+        Log.d(TAG, "🔄 Getting JWT token from Intent extras...");
+        
+        String jwtToken = null;
+        Intent intent = getIntent();
+        if (intent != null && intent.hasExtra("jwt_token")) {
+            jwtToken = intent.getStringExtra("jwt_token");
+            
+            if (jwtToken != null && !jwtToken.equals("NULL_TOKEN") && !jwtToken.equals("ERROR_TOKEN") && !jwtToken.equals("FUNCTION_NOT_FOUND")) {
+                String tokenPreview = jwtToken.length() > 20 ? 
+                    jwtToken.substring(0, 10) + "..." + jwtToken.substring(jwtToken.length() - 10) : 
+                    jwtToken;
+                Log.d(TAG, "✅ Valid JWT token found in Intent extras (length: " + jwtToken.length() + ", preview: " + tokenPreview + ")");
+            } else {
+                Log.e(TAG, "❌ Invalid JWT token in Intent extras: " + jwtToken);
+                jwtToken = null;
+            }
+        } else {
+            Log.e(TAG, "❌ No JWT token found in Intent extras");
+        }
+            
+        if (jwtToken == null) {
+            Log.e(TAG, "❌ No JWT token available for upload");
+            showUploadError("Authentication token not available. Please try again.");
+            return;
+        }
+        
+        Log.d(TAG, "🔄 Using fresh JWT token for upload (length: " + jwtToken.length() + ")");
+        
+        // Make jwtToken final for lambda
+        final String finalJwtToken = jwtToken;
+        
+        // Show JWT token dialog for debugging
+        String tokenPreview = jwtToken.length() > 40 ? 
+            jwtToken.substring(0, 20) + "..." + jwtToken.substring(jwtToken.length() - 20) : 
+            jwtToken;
+            
+        String dialogMessage = "🔍 EventPhotoPicker JWT Token Debug:\n\n" +
+                              "Token Length: " + jwtToken.length() + "\n" +
+                              "Token Preview: " + tokenPreview + "\n\n" +
+                              "Upload will start in 5 seconds...";
+        
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("🔐 JWT Token Debug")
+               .setMessage(dialogMessage)
+               .setPositiveButton("Start Upload Now", (dialog, which) -> {
+                   Log.d(TAG, "⚡ Starting upload immediately (user clicked)...");
+                   uploadNextPhoto(selectedPhotos, 0, finalJwtToken);
+               })
+               .setNegativeButton("Wait 5 sec", null)
+               .setCancelable(false);
+        
+        AlertDialog dialog = builder.create();
+        dialog.show();
+        
+        // Add 5 second delay so user can see JWT debug info in dialog
+        new android.os.Handler().postDelayed(() -> {
+            if (dialog.isShowing()) {
+                dialog.dismiss();
+                Log.d(TAG, "⏰ Starting upload after debug display delay...");
+                uploadNextPhoto(selectedPhotos, 0, finalJwtToken);
+            }
+        }, 5000); // 5 second delay
+    }
+    
+    private void uploadNextPhoto(List<PhotoItem> photos, int index, String jwtToken) {
+        if (index >= photos.size()) {
+            // All photos uploaded successfully
+            Log.d(TAG, "✅ All photos uploaded successfully!");
+            showUploadComplete();
+            return;
+        }
+        
+        PhotoItem photo = photos.get(index);
+        Log.d(TAG, "📤 Uploading photo " + (index + 1) + "/" + photos.size() + ": " + photo.getDisplayName());
+        
+        // Update progress dialog
+        updateUploadProgress(index + 1, photos.size(), photo.getDisplayName());
+        
+        // Upload this photo
+        uploadSinglePhoto(photo, jwtToken, success -> {
+            if (success) {
+                uploadedCount++;
+                Log.d(TAG, "✅ Photo " + (index + 1) + " uploaded successfully");
+                // Continue with next photo
+                uploadNextPhoto(photos, index + 1, jwtToken);
+            } else {
+                Log.e(TAG, "❌ Photo " + (index + 1) + " upload failed");
+                showUploadError("Failed to upload " + photo.getDisplayName());
+            }
+        });
+    }
+    
+    private void updateUploadProgress(int current, int total, String fileName) {
+        runOnUiThread(() -> {
+            if (uploadProgressDialog != null) {
+                uploadProgressDialog.setMessage("Uploading " + current + "/" + total + "\n" + fileName);
+            }
+        });
+    }
+    
+    private void showUploadComplete() {
+        runOnUiThread(() -> {
+            if (uploadProgressDialog != null) {
+                uploadProgressDialog.dismiss();
+            }
+            
+            AlertDialog.Builder builder = new AlertDialog.Builder(this);
+            builder.setTitle("✅ Upload Complete");
+            builder.setMessage("Successfully uploaded " + uploadedCount + " photos to " + eventName);
+            builder.setPositiveButton("OK", (dialog, which) -> {
+                dialog.dismiss();
+                finish(); // Close EventPhotoPicker
+            });
+            builder.show();
+        });
+    }
+    
+    private void showUploadError(String message) {
+        runOnUiThread(() -> {
+            if (uploadProgressDialog != null) {
+                uploadProgressDialog.dismiss();
+            }
+            
+            AlertDialog.Builder builder = new AlertDialog.Builder(this);
+            builder.setTitle("❌ Upload Error");
+            builder.setMessage(message);
+            builder.setPositiveButton("OK", (dialog, which) -> {
+                dialog.dismiss();
+                finish();
+            });
+            builder.show();
+        });
+    }
+    
+    // Callback interface for upload result
+    private interface UploadCallback {
+        void onComplete(boolean success);
+    }
+    
+    private void uploadSinglePhoto(PhotoItem photo, String jwtToken, UploadCallback callback) {
+        Log.d(TAG, "🔥 Starting upload of: " + photo.getDisplayName());
+        
+        // Run upload in background thread
+        new Thread(() -> {
+            try {
+                // Step 1: Read photo data and convert to Base64
+                String base64Data = readPhotoAsBase64(photo);
+                if (base64Data == null) {
+                    Log.e(TAG, "❌ Failed to read photo data: " + photo.getDisplayName());
+                    callback.onComplete(false);
+                    return;
+                }
+                
+                // Step 2: Prepare API request body
+                String requestBody = buildUploadRequestBody(photo, base64Data);
+                
+                // Step 3: Make API call to mobile upload endpoint
+                boolean uploadSuccess = callMobileUploadAPI(requestBody, jwtToken);
+                
+                Log.d(TAG, "📤 Upload result for " + photo.getDisplayName() + ": " + (uploadSuccess ? "SUCCESS" : "FAILED"));
+                callback.onComplete(uploadSuccess);
+                
+            } catch (Exception e) {
+                Log.e(TAG, "❌ Upload exception for " + photo.getDisplayName() + ": " + e.getMessage());
+                callback.onComplete(false);
+            }
+        }).start();
+    }
+    
+    private String readPhotoAsBase64(PhotoItem photo) {
+        try {
+            // Read photo from URI
+            InputStream inputStream = getContentResolver().openInputStream(photo.getUri());
+            if (inputStream == null) {
+                Log.e(TAG, "❌ Could not open input stream for: " + photo.getDisplayName());
+                return null;
+            }
+            
+            // Read into byte array
+            byte[] photoBytes = new byte[inputStream.available()];
+            inputStream.read(photoBytes);
+            inputStream.close();
+            
+            // Convert to Base64
+            String base64 = Base64.encodeToString(photoBytes, Base64.DEFAULT);
+            Log.d(TAG, "✅ Photo read successfully: " + photo.getDisplayName() + " (" + photoBytes.length + " bytes -> " + base64.length() + " base64 chars)");
+            
+            // Debug: Validate Base64 encoding
+            if (base64.contains("\n") || base64.contains("\r")) {
+                Log.w(TAG, "⚠️ Base64 contains newlines - this might cause JSON issues");
+                // Remove newlines from Base64 for clean JSON
+                base64 = base64.replaceAll("\\s", "");
+                Log.d(TAG, "🔧 Cleaned Base64 (removed whitespace): " + base64.length() + " chars");
+            }
+            
+            // Check for valid Base64 characters
+            if (!base64.matches("^[A-Za-z0-9+/]*={0,2}$")) {
+                Log.e(TAG, "❌ Invalid Base64 characters detected!");
+            }
+            
+            return base64;
+            
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error reading photo: " + photo.getDisplayName() + " - " + e.getMessage());
+            return null;
+        }
+    }
+    
+    private String buildUploadRequestBody(PhotoItem photo, String base64Data) {
+        try {
+            // Build JSON request body according to API spec
+            StringBuilder json = new StringBuilder();
+            json.append("{");
+            json.append("\"eventId\":\"").append(eventId).append("\",");
+            json.append("\"fileName\":\"").append(photo.getDisplayName()).append("\",");
+            json.append("\"fileData\":\"").append(base64Data).append("\",");
+            json.append("\"mediaType\":\"photo\"");
+            
+            // Add optional timestamp if available
+            if (photo.getDateTaken() > 0) {
+                String timestamp = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
+                    .format(new Date(photo.getDateTaken()));
+                json.append(",\"originalTimestamp\":\"").append(timestamp).append("\"");
+            }
+            
+            // Add device info
+            json.append(",\"deviceId\":\"Android_").append(Build.MODEL.replaceAll("\\s+", "_")).append("\"");
+            
+            // Add metadata
+            json.append(",\"metadata\":{");
+            json.append("\"width\":").append(photo.getWidth()).append(",");
+            json.append("\"height\":").append(photo.getHeight()).append(",");
+            json.append("\"size\":").append(photo.getSize());
+            json.append("}");
+            
+            json.append("}");
+            
+            String jsonString = json.toString();
+            
+            // Debug: Log first 500 chars and last 100 chars of JSON to verify structure
+            Log.d(TAG, "📄 Upload request body prepared for: " + photo.getDisplayName() + " (JSON size: " + jsonString.length() + " chars)");
+            Log.d(TAG, "🔍 JSON start (500 chars): " + jsonString.substring(0, Math.min(500, jsonString.length())));
+            Log.d(TAG, "🔍 JSON end (100 chars): " + jsonString.substring(Math.max(0, jsonString.length() - 100)));
+            
+            // Validate JSON structure
+            if (!jsonString.startsWith("{") || !jsonString.endsWith("}")) {
+                Log.e(TAG, "❌ Invalid JSON structure - doesn't start/end with braces");
+            }
+            
+            return jsonString;
+            
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error building request body: " + e.getMessage());
+            return null;
+        }
+    }
+    
+    private boolean callMobileUploadAPI(String requestBody, String jwtToken) {
+        try {
+            // API endpoint from documentation
+            URL url = new URL("https://jgfcfdlfcnmaripgpepl.supabase.co/functions/v1/mobile-upload");
+            
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("POST");
+            connection.setRequestProperty("Content-Type", "application/json");
+            connection.setRequestProperty("Authorization", "Bearer " + jwtToken);
+            connection.setRequestProperty("apikey", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpnZmNmZGxmY25tYXJpcGdwZXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI1NDM2MjgsImV4cCI6MjA2ODExOTYyOH0.OmkqPDJM8-BKLDo5WxsL8Nop03XxAaygNaToOMKkzGY");
+            connection.setDoOutput(true);
+            connection.setConnectTimeout(30000); // 30 seconds
+            connection.setReadTimeout(60000); // 60 seconds for large uploads
+            
+            // Debug: Log request details
+            Log.d(TAG, "🌐 HTTP Request Details:");
+            Log.d(TAG, "  URL: " + url.toString());
+            Log.d(TAG, "  Method: POST");
+            Log.d(TAG, "  Content-Type: application/json");
+            
+            // Show JWT token details for debugging 401 issues
+            String tokenPreview = jwtToken.length() > 40 ? 
+                jwtToken.substring(0, 20) + "..." + jwtToken.substring(jwtToken.length() - 20) : 
+                jwtToken;
+            Log.d(TAG, "  🔑 JWT Token (length: " + jwtToken.length() + "): " + tokenPreview);
+            Log.d(TAG, "  🔑 Authorization Header: Bearer " + tokenPreview);
+            
+            // Temporarily log full token for debugging (REMOVE IN PRODUCTION)
+            Log.d(TAG, "  🔐 FULL JWT TOKEN (REMOVE THIS LOG): " + jwtToken);
+            
+            // Decode JWT to check expiration
+            try {
+                String[] parts = jwtToken.split("\\.");
+                if (parts.length == 3) {
+                    // Decode payload (base64)
+                    String payload = new String(android.util.Base64.decode(parts[1], android.util.Base64.URL_SAFE | android.util.Base64.NO_PADDING));
+                    Log.d(TAG, "  🔍 JWT Payload: " + payload);
+                    
+                    // Check for exp field
+                    if (payload.contains("\"exp\":")) {
+                        int expStart = payload.indexOf("\"exp\":") + 6;
+                        int expEnd = payload.indexOf(",", expStart);
+                        if (expEnd == -1) expEnd = payload.indexOf("}", expStart);
+                        String expStr = payload.substring(expStart, expEnd).trim();
+                        long exp = Long.parseLong(expStr);
+                        long now = System.currentTimeMillis() / 1000;
+                        
+                        // Convert Unix timestamps to UTC ISO 8601 format
+                        java.text.SimpleDateFormat isoFormat = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
+                        isoFormat.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+                        
+                        String currentTimeISO = isoFormat.format(new java.util.Date(now * 1000));
+                        String expirationTimeISO = isoFormat.format(new java.util.Date(exp * 1000));
+                        
+                        Log.d(TAG, "  ⏰ JWT Timestamps (UTC):");
+                        Log.d(TAG, "    Current Time: " + currentTimeISO);
+                        Log.d(TAG, "    Expiration Time: " + expirationTimeISO);
+                        Log.d(TAG, "    Unix: exp=" + exp + ", now=" + now);
+                        
+                        if (exp < now) {
+                            long expiredSeconds = now - exp;
+                            Log.e(TAG, "  ❌ JWT TOKEN IS EXPIRED! Expired " + expiredSeconds + " seconds ago (" + (expiredSeconds / 60) + " minutes)");
+                        } else {
+                            long validSeconds = exp - now;
+                            Log.d(TAG, "  ✅ JWT token valid for " + validSeconds + " more seconds (" + (validSeconds / 60) + " minutes)");
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "  ❌ Failed to decode JWT: " + e.getMessage());
+            }
+            
+            Log.d(TAG, "  Body size: " + requestBody.length() + " chars");
+            
+            // Send request body with UTF-8 encoding
+            byte[] requestBytes = requestBody.getBytes("UTF-8");
+            Log.d(TAG, "  Body bytes: " + requestBytes.length + " bytes (UTF-8 encoded)");
+            
+            try (OutputStream outputStream = connection.getOutputStream()) {
+                outputStream.write(requestBytes);
+                outputStream.flush();
+                Log.d(TAG, "✅ Request body sent successfully");
+            }
+            
+            // Get response
+            int responseCode = connection.getResponseCode();
+            Log.d(TAG, "📡 API Response Code: " + responseCode);
+            
+            // Read response body
+            InputStream responseStream = responseCode >= 200 && responseCode < 300 
+                ? connection.getInputStream() 
+                : connection.getErrorStream();
+                
+            String responseBody = readInputStreamAsString(responseStream);
+            Log.d(TAG, "📡 API Response Body: " + responseBody);
+            
+            // Check if successful
+            boolean success = responseCode >= 200 && responseCode < 300;
+            if (success) {
+                Log.d(TAG, "✅ Upload API call successful");
+            } else {
+                Log.e(TAG, "❌ Upload API call failed with code: " + responseCode);
+            }
+            
+            return success;
+            
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Upload API call exception: " + e.getMessage());
+            return false;
+        }
+    }
+    
+    private String readInputStreamAsString(InputStream inputStream) {
+        try {
+            if (inputStream == null) return "";
+            
+            StringBuilder result = new StringBuilder();
+            byte[] buffer = new byte[1024];
+            int length;
+            while ((length = inputStream.read(buffer)) != -1) {
+                result.append(new String(buffer, 0, length, "UTF-8"));
+            }
+            inputStream.close();
+            return result.toString();
+        } catch (Exception e) {
+            Log.e(TAG, "Error reading response: " + e.getMessage());
+            return "";
+        }
     }
 }
