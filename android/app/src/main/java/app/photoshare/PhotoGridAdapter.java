@@ -7,6 +7,7 @@ import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 import com.bumptech.glide.Glide;
@@ -106,6 +107,12 @@ public class PhotoGridAdapter extends RecyclerView.Adapter<PhotoGridAdapter.Phot
         private LinearLayout layoutPhotoInfo;
         private TextView tvPhotoName;
         private TextView tvPhotoDate;
+        
+        // New uploaded photo UI elements
+        private View uploadedOverlay;
+        private View statusBackground;
+        private ImageView ivUploadedCheck;
+        private ImageView ivUploadIcon;
 
         public PhotoViewHolder(@NonNull View itemView) {
             super(itemView);
@@ -116,6 +123,12 @@ public class PhotoGridAdapter extends RecyclerView.Adapter<PhotoGridAdapter.Phot
             layoutPhotoInfo = itemView.findViewById(R.id.layout_photo_info);
             tvPhotoName = itemView.findViewById(R.id.tv_photo_name);
             tvPhotoDate = itemView.findViewById(R.id.tv_photo_date);
+            
+            // New uploaded photo UI elements
+            uploadedOverlay = itemView.findViewById(R.id.view_uploaded_overlay);
+            statusBackground = itemView.findViewById(R.id.view_status_background);
+            ivUploadedCheck = itemView.findViewById(R.id.iv_uploaded_check);
+            ivUploadIcon = itemView.findViewById(R.id.iv_upload_icon);
 
             // Set click listener for entire item
             itemView.setOnClickListener(v -> toggleSelection());
@@ -135,12 +148,31 @@ public class PhotoGridAdapter extends RecyclerView.Adapter<PhotoGridAdapter.Phot
             selectionOverlay.setVisibility(isSelected ? View.VISIBLE : View.GONE);
             selectionIndicator.setVisibility(isSelected ? View.VISIBLE : View.GONE);
 
-            // Update upload status
+            // Update upload status with new design
             boolean isUploaded = uploadedPhotoIds.contains(String.valueOf(photo.getId()));
-            ivUploadStatus.setVisibility(isUploaded ? View.VISIBLE : View.GONE);
+            
             if (isUploaded) {
-                ivUploadStatus.setImageResource(android.R.drawable.ic_dialog_info);
-                ivUploadStatus.setColorFilter(context.getResources().getColor(android.R.color.holo_green_dark));
+                // Show gradient overlay for uploaded photos
+                uploadedOverlay.setVisibility(View.VISIBLE);
+                
+                // Show green checkmark with background
+                statusBackground.setVisibility(View.VISIBLE);
+                ivUploadedCheck.setVisibility(View.VISIBLE);
+                ivUploadIcon.setVisibility(View.GONE);
+                
+                // Keep old indicator for compatibility
+                ivUploadStatus.setVisibility(View.GONE);
+            } else {
+                // Hide gradient overlay for non-uploaded photos
+                uploadedOverlay.setVisibility(View.GONE);
+                
+                // Show upload icon with background
+                statusBackground.setVisibility(View.VISIBLE);
+                ivUploadedCheck.setVisibility(View.GONE);
+                ivUploadIcon.setVisibility(View.VISIBLE);
+                
+                // Keep old indicator hidden
+                ivUploadStatus.setVisibility(View.GONE);
             }
 
             // Show photo info if enabled
@@ -162,6 +194,13 @@ public class PhotoGridAdapter extends RecyclerView.Adapter<PhotoGridAdapter.Phot
 
             PhotoItem photo = photos.get(position);
             long photoId = photo.getId();
+
+            // Check if photo is already uploaded - prevent selection
+            if (uploadedPhotoIds.contains(String.valueOf(photoId))) {
+                // Show toast to inform user
+                Toast.makeText(context, "Photo already uploaded to this event", Toast.LENGTH_SHORT).show();
+                return;
+            }
 
             if (selectedPhotoIds.contains(photoId)) {
                 selectedPhotoIds.remove(photoId);

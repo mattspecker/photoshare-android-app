@@ -22,7 +22,15 @@
         android:background="@drawable/photoshare_selection_overlay"
         android:visibility="gone" />
 
-    <!-- Upload Status Indicator -->
+    <!-- Uploaded Photo Gradient Overlay -->
+    <View
+        android:id="@+id/view_uploaded_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/photoshare_uploaded_gradient"
+        android:visibility="gone" />
+
+    <!-- Upload Status Indicator (old - keep for compatibility) -->
     <ImageView
         android:id="@+id/iv_upload_status"
         android:layout_width="24dp"
@@ -72,5 +80,42 @@
             android:textColor="#CCCCCC" />
 
     </LinearLayout>
+
+    <!-- Status Icons Container (bottom right) -->
+    <FrameLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="6dp">
+
+        <!-- Background blur for status icons -->
+        <View
+            android:id="@+id/view_status_background"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:background="@drawable/photoshare_status_icon_background"
+            android:visibility="gone" />
+
+        <!-- Green checkmark for uploaded photos -->
+        <ImageView
+            android:id="@+id/iv_uploaded_check"
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:layout_gravity="center"
+            android:src="@android:drawable/ic_menu_save"
+            android:tint="#4CAF50"
+            android:visibility="gone" />
+
+        <!-- Upload icon for non-uploaded photos -->
+        <ImageView
+            android:id="@+id/iv_upload_icon"
+            android:layout_width="18dp"
+            android:layout_height="18dp"
+            android:layout_gravity="center"
+            android:src="@android:drawable/stat_sys_upload"
+            android:tint="#757575"
+            android:visibility="gone" />
+
+    </FrameLayout>
 
 </FrameLayout>

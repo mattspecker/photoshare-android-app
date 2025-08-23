@@ -80,6 +80,16 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
         setupButtons();
         loadPhotos();
     }
+    
+    @Override
+    protected void onResume() {
+        super.onResume();
+        
+        // Pre-load fresh chunked JWT token every time activity becomes active
+        // This ensures we have a fresh token whether it's a new launch or returning from background
+        Log.d(TAG, "🔄 EventPhotoPicker resumed - checking for fresh JWT token...");
+        preloadFreshChunkedToken();
+    }
 
     private void initViews() {
         tvPhotoCount = findViewById(R.id.tv_photo_count);
@@ -242,6 +252,7 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
         adapter.setPhotos(photos);
         updatePhotoCount(photos.size());
     }
+
 
     private void updatePhotoCount(int count) {
         tvPhotoCount.setText(count + " photos");
@@ -596,35 +607,39 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
         String monitoringToken = prefs.getString("current_jwt_token", null);
         Log.d(TAG, "🔍 Monitoring token: " + (monitoringToken != null ? monitoringToken.length() + " chars" : "null"));
         
-        // STRICT CHUNKED TOKEN PRIORITY: Only use fresh chunked tokens first
+        // Token should already be pre-loaded from onResume() - just check status
+        Log.d(TAG, "🔄 Fresh token status: " + (freshToken != null ? "exists but age=" + ((System.currentTimeMillis() - freshTokenTime) / 1000) + "s" : "null"));
+        if (freshToken == null || (System.currentTimeMillis() - freshTokenTime) >= 300000) {
+            Log.w(TAG, "⚠️ Fresh token not available or expired - this should have been pre-loaded in onResume()");
+        }
+        
+        // PRIORITY: Use fresh chunked tokens first (now potentially auto-requested)
         if (freshToken != null && (System.currentTimeMillis() - freshTokenTime) < 300000) {
             Log.d(TAG, "✅ Using fresh JWT token from chunked transfer (length: " + freshToken.length() + ", age: " + ((System.currentTimeMillis() - freshTokenTime) / 1000) + "s)");
             Log.d(TAG, "🔍 Fresh token preview: " + (freshToken.length() > 100 ? freshToken.substring(0, 50) + "..." + freshToken.substring(freshToken.length() - 50) : freshToken));
             jwtToken = freshToken;
         } else if (freshToken != null) {
-            Log.w(TAG, "⚠️ Fresh token exists but is older than 5 minutes (age: " + ((System.currentTimeMillis() - freshTokenTime) / 1000) + "s)");
-            Log.w(TAG, "⚠️ Falling back to monitoring token - upload may fail with expired token");
+            Log.w(TAG, "⚠️ Fresh token still expired after auto-request (age: " + ((System.currentTimeMillis() - freshTokenTime) / 1000) + "s)");
+            Log.w(TAG, "⚠️ Falling back to monitoring token - upload may fail");
             
-            // Only use monitoring token if it's significantly longer than truncated tokens
+            // Fallback to monitoring token if long enough
             if (monitoringToken != null && monitoringToken.length() > 500) {
-                Log.d(TAG, "✅ Using monitoring JWT token from SharedPreferences (length: " + monitoringToken.length() + ")");
+                Log.d(TAG, "✅ Using monitoring JWT token as fallback (length: " + monitoringToken.length() + ")");
                 Log.d(TAG, "🔍 Monitoring token preview: " + (monitoringToken.length() > 100 ? monitoringToken.substring(0, 50) + "..." + monitoringToken.substring(monitoringToken.length() - 50) : monitoringToken));
                 jwtToken = monitoringToken;
             } else {
-                Log.e(TAG, "❌ Monitoring token is too short (" + (monitoringToken != null ? monitoringToken.length() : 0) + " chars) - likely truncated");
-                Log.e(TAG, "❌ Please click the red button 🔐 first to get a fresh chunked token");
+                Log.e(TAG, "❌ No valid tokens available - monitoring token too short (" + (monitoringToken != null ? monitoringToken.length() : 0) + " chars)");
             }
         } else {
-            Log.w(TAG, "⚠️ No fresh chunked token available");
+            Log.w(TAG, "⚠️ Auto-request did not produce fresh token - using monitoring token");
             
-            // Only use monitoring token as absolute last resort and if it's long enough
+            // Last resort: use monitoring token if available and long enough
             if (monitoringToken != null && monitoringToken.length() > 500) {
-                Log.d(TAG, "✅ Using monitoring JWT token from SharedPreferences (length: " + monitoringToken.length() + ")");
+                Log.d(TAG, "✅ Using monitoring JWT token as last resort (length: " + monitoringToken.length() + ")");
                 Log.d(TAG, "🔍 Monitoring token preview: " + (monitoringToken.length() > 100 ? monitoringToken.substring(0, 50) + "..." + monitoringToken.substring(monitoringToken.length() - 50) : monitoringToken));
                 jwtToken = monitoringToken;
             } else {
-                Log.e(TAG, "❌ Monitoring token is too short (" + (monitoringToken != null ? monitoringToken.length() : 0) + " chars) - likely truncated");
-                Log.e(TAG, "❌ Please click the red button 🔐 first to get a fresh chunked token");
+                Log.e(TAG, "❌ No valid tokens available after auto-request");
             }
         }
         
@@ -1086,10 +1101,21 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
     
     private String buildUploadRequestBody(PhotoItem photo, String base64Data) {
         try {
+            // Extract clean event ID from full URL if needed
+            String cleanEventId = eventId;
+            if (eventId != null && eventId.contains("/event/")) {
+                // Extract just the event ID part from URLs like "https://photo-share.app/event/6724e0bb1f5d6e4ef71e"
+                int eventIndex = eventId.lastIndexOf("/event/");
+                if (eventIndex != -1) {
+                    cleanEventId = eventId.substring(eventIndex + 7); // Skip "/event/"
+                    Log.d(TAG, "🔧 Extracted clean event ID: '" + cleanEventId + "' from full URL: '" + eventId + "'");
+                }
+            }
+            
             // Build JSON request body according to API spec
             StringBuilder json = new StringBuilder();
             json.append("{");
-            json.append("\"eventId\":\"").append(eventId).append("\",");
+            json.append("\"eventId\":\"").append(cleanEventId).append("\",");
             json.append("\"fileName\":\"").append(photo.getDisplayName()).append("\",");
             json.append("\"fileData\":\"").append(base64Data).append("\",");
             json.append("\"mediaType\":\"photo\"");
@@ -1152,6 +1178,18 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
             Log.d(TAG, "  URL: " + url.toString());
             Log.d(TAG, "  Method: POST");
             Log.d(TAG, "  Content-Type: application/json");
+            
+            // Extract event ID from request body for debugging
+            String eventIdFromRequest = "UNKNOWN";
+            if (requestBody.contains("\"eventId\":\"")) {
+                int start = requestBody.indexOf("\"eventId\":\"") + 11;
+                int end = requestBody.indexOf("\"", start);
+                if (end != -1) {
+                    eventIdFromRequest = requestBody.substring(start, end);
+                }
+            }
+            Log.d(TAG, "🔍 PERMISSIONS DEBUG:");
+            Log.d(TAG, "  Sending Event ID: " + eventIdFromRequest);
             
             // Show JWT token details for debugging 401 issues
             String tokenPreview = jwtToken.length() > 40 ? 
@@ -1260,6 +1298,91 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
         } catch (Exception e) {
             Log.e(TAG, "Error reading response: " + e.getMessage());
             return "";
+        }
+    }
+    
+    /**
+     * Pre-load fresh chunked JWT token in background so it's ready for upload
+     * Called from onResume() to ensure fresh token on every activity activation
+     */
+    private void preloadFreshChunkedToken() {
+        Log.d(TAG, "🔄 PRE-LOADING fresh chunked JWT token...");
+        
+        // Check if we already have a fresh token (less than 5 minutes old)
+        SharedPreferences prefs = getSharedPreferences("PhotoSharePrefs", MODE_PRIVATE);
+        String freshToken = prefs.getString("fresh_jwt_token", null);
+        long freshTokenTime = prefs.getLong("fresh_token_timestamp", 0);
+        
+        if (freshToken != null && (System.currentTimeMillis() - freshTokenTime) < 300000) {
+            Log.d(TAG, "🔄 Fresh token already available (age: " + ((System.currentTimeMillis() - freshTokenTime) / 1000) + "s) - no need to pre-load");
+            return;
+        }
+        
+        Log.d(TAG, "🔄 No fresh token available or expired - pre-loading now...");
+        
+        // Request fresh chunked token via Capacitor WebView bridge (async)
+        // Use Handler to delay slightly and ensure WebView is ready
+        new Handler().postDelayed(() -> {
+            requestFreshChunkedTokenViaCapacitor();
+        }, 1000); // 1 second delay to ensure WebView is ready
+    }
+    
+    /**
+     * Request fresh chunked JWT token via Capacitor WebView bridge
+     * This calls window.testChunkedJwtTransfer() automatically
+     */
+    private void requestFreshChunkedTokenViaCapacitor() {
+        Log.d(TAG, "🔄 AUTO-REQUESTING fresh chunked JWT token via Capacitor...");
+        
+        runOnUiThread(() -> {
+            try {
+                // Use Capacitor's plugin system to get the bridge and execute JavaScript
+                // Since we're launched by EventPhotoPickerPlugin, we can access the static bridge
+                if (EventPhotoPickerPlugin.getLastBridge() != null) {
+                    String javascript = 
+                        "javascript:(async function() {" +
+                        "  console.log('🔄 AUTO: Starting automatic chunked JWT request...');" +
+                        "  if (window.testChunkedJwtTransfer) {" +
+                        "    try {" +
+                        "      console.log('🔄 AUTO: Calling testChunkedJwtTransfer()...');" +
+                        "      const result = await window.testChunkedJwtTransfer();" +
+                        "      if (result) {" +
+                        "        console.log('🔄 AUTO: ✅ testChunkedJwtTransfer completed successfully!');" +
+                        "      } else {" +
+                        "        console.log('🔄 AUTO: ⚠️ testChunkedJwtTransfer returned no result');" +
+                        "      }" +
+                        "    } catch (error) {" +
+                        "      console.log('🔄 AUTO: ❌ Error in testChunkedJwtTransfer: ' + error.message);" +
+                        "    }" +
+                        "  } else {" +
+                        "    console.log('🔄 AUTO: ❌ window.testChunkedJwtTransfer function not available');" +
+                        "  }" +
+                        "  return 'auto-request-completed';" +
+                        "})();";
+                    
+                    EventPhotoPickerPlugin.getLastBridge().getWebView().evaluateJavascript(javascript, result -> {
+                        Log.d(TAG, "🔄 Auto-request JavaScript executed: " + result);
+                    });
+                    
+                    Log.d(TAG, "🔄 Sent auto-request JavaScript to Capacitor WebView");
+                } else {
+                    Log.w(TAG, "❌ No Capacitor bridge available for auto-request");
+                }
+                
+            } catch (Exception e) {
+                Log.e(TAG, "❌ Error in automatic chunked token request: " + e.getMessage());
+            }
+        });
+    }
+    
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        
+        // Dismiss any open dialogs to prevent window leaks
+        if (uploadProgressDialog != null && uploadProgressDialog.isShowing()) {
+            uploadProgressDialog.dismiss();
+            uploadProgressDialog = null;
         }
     }
 }

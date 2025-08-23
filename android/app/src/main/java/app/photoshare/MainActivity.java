@@ -12,10 +12,12 @@ import android.view.Gravity;
 import android.graphics.Color;
 import android.app.AlertDialog;
 import android.webkit.JavascriptInterface;
+import android.content.Context;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.Plugin;
 
 public class MainActivity extends BridgeActivity {
+    private static final String TAG = "MainActivity";
     
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -37,9 +39,6 @@ public class MainActivity extends BridgeActivity {
         
         // Set up automatic JWT token monitoring  
         setupJwtTokenMonitoring();
-        
-        // JWT test button - testing web team's new JWT functions
-        addJwtTestButtonOverlay();
     }
     
     private void initializeSafeArea() {
@@ -514,10 +513,8 @@ public class MainActivity extends BridgeActivity {
                         return;
                     }
                     
-                    // Show final results
-                    runOnUiThread(() -> {
-                        showJwtTestDialog(results.toString());
-                    });
+                    // Log final results (removed dialog display)
+                    Log.d("PhotoShareJWT", "JWT Token Extraction Results: " + results.toString());
                 }
             }
         );
@@ -572,10 +569,8 @@ public class MainActivity extends BridgeActivity {
                         results.append("   Manual Extraction: FAILED - ").append(e.getMessage()).append("\n");
                     }
                     
-                    // Show final results
-                    runOnUiThread(() -> {
-                        showJwtTestDialog(results.toString());
-                    });
+                    // Log final results (removed dialog display)
+                    Log.d("PhotoShareJWT", "JWT Token Extraction Results: " + results.toString());
                 }
             }
         );
@@ -593,244 +588,14 @@ public class MainActivity extends BridgeActivity {
         Log.d("PhotoShareJWT", "JWT token stored in SharedPreferences");
     }
     
-    private void showJwtTestDialog(String jsResult) {
-        StringBuilder dialogMessage = new StringBuilder();
-        dialogMessage.append("🔥 JWT TOKEN TEST RESULTS\n\n");
-        
-        if (jsResult != null && !jsResult.equals("null")) {
-            dialogMessage.append(jsResult).append("\n\n");
-        } else {
-            dialogMessage.append("No data returned from JavaScript execution.\n\n");
-        }
-        
-        // Now get the actual JWT tokens for comparison
-        WebView webView = bridge.getWebView();
-        
-        dialogMessage.append("🔍 ACTUAL JWT TOKEN RETRIEVAL:\n");
-        
-        // WORKAROUND: Use JavaScript bridge instead of evaluateJavascript due to WebView truncation
-        Log.d("MainActivity", "🔄 Setting up JavaScript bridge for JWT token retrieval...");
-        
-        // Add JavaScript interface to receive JWT token
-        Object jwtBridge = new Object() {
-            @JavascriptInterface
-            public void receiveJwtToken(String token) {
-                Log.d("MainActivity", "🔍 BRIDGE: Received JWT token via bridge (length: " + (token != null ? token.length() : 0) + ")");
-                if (token != null) {
-                    Log.d("MainActivity", "🔍 BRIDGE: Token preview: " + (token.length() > 40 ? token.substring(0, 20) + "..." + token.substring(token.length() - 20) : token));
-                    String[] parts = token.split("\\.");
-                    Log.d("MainActivity", "🔍 BRIDGE: Token parts: " + parts.length + " (should be 3)");
-                }
-                
-                runOnUiThread(() -> {
-                    String tokenInfo;
-                    if (token != null && !token.equals("null") && !token.equals("FUNCTION_NOT_FOUND") && !token.startsWith("ERROR:") && !token.isEmpty()) {
-                        String[] parts = token.split("\\.");
-                        String preview = token.length() > 40 ? 
-                            token.substring(0, 20) + "..." + token.substring(token.length() - 20) : 
-                            token;
-                        tokenInfo = "🔍 ACTUAL JWT TOKEN VIA BRIDGE:\n" +
-                                   "Length: " + token.length() + "\n" +
-                                   "Parts: " + parts.length + " (should be 3)\n" +
-                                   "Preview: " + preview;
-                    } else {
-                        tokenInfo = "❌ Invalid token received via bridge: " + token;
-                    }
-                    
-                    String finalMessage = dialogMessage.toString() + tokenInfo;
-                    
-                    new AlertDialog.Builder(MainActivity.this)
-                        .setTitle("🔐 JWT Token Test Results")
-                        .setMessage(finalMessage)
-                        .setPositiveButton("OK", null)
-                        .show();
-                });
-            }
-        };
-        
-        // Register the JavaScript interface
-        webView.addJavascriptInterface(jwtBridge, "AndroidJwtBridge");
-        Log.d("MainActivity", "✅ AndroidJwtBridge interface registered successfully");
-        
-        // Wait a moment for the interface to be available, then execute JavaScript
-        new android.os.Handler().postDelayed(() -> {
-            webView.evaluateJavascript(
-            "(async () => { " +
-            "  try { " +
-            "    console.log('🔍 RED BOX: Checking available JWT functions...'); " +
-            "    " +
-            "    // Comprehensive function availability check " +
-            "    const availableFunctions = { " +
-            "      sendJwtTokenToAndroidEventPicker: !!window.sendJwtTokenToAndroidEventPicker, " +
-            "      getPhotoShareJwtTokenForAndroid: !!window.getPhotoShareJwtTokenForAndroid, " +
-            "      getPhotoShareJwtTokenForAndroidChunked: !!window.getPhotoShareJwtTokenForAndroidChunked, " +
-            "      testChunkedJwtTransfer: !!window.testChunkedJwtTransfer, " +
-            "      getPhotoShareJwtToken: !!window.getPhotoShareJwtToken " +
-            "    }; " +
-            "    " +
-            "    console.log('🔍 RED BOX: Available functions:', JSON.stringify(availableFunctions)); " +
-            "    " +
-            "    // Try chunked transfer first (if available) " +
-            "    if (window.sendJwtTokenToAndroidEventPicker && window.getPhotoShareJwtTokenForAndroid) { " +
-            "      console.log('🧩 RED BOX: Using chunked transfer method'); " +
-            "      const token = await window.getPhotoShareJwtTokenForAndroid(); " +
-            "      " +
-            "      if (token && token.length > 100) { " +
-            "        console.log('🧩 RED BOX: Got token, starting chunked transfer (' + token.length + ' chars)'); " +
-            "        const success = await window.sendJwtTokenToAndroidEventPicker(token); " +
-            "        " +
-            "        if (success) { " +
-            "          console.log('🧩 RED BOX: ✅ Chunked transfer completed successfully'); " +
-            "          await window.Capacitor.Plugins.EventPhotoPicker.receiveJwtTokenForRedBox({ token: 'CHUNKED_SUCCESS_' + token.length + '_CHARS' }); " +
-            "        } else { " +
-            "          console.log('🧩 RED BOX: ❌ Chunked transfer failed'); " +
-            "          await window.Capacitor.Plugins.EventPhotoPicker.receiveJwtTokenForRedBox({ token: 'CHUNKED_FAILED' }); " +
-            "        } " +
-            "      } else { " +
-            "        console.log('🧩 RED BOX: ❌ Invalid or short token'); " +
-            "        await window.Capacitor.Plugins.EventPhotoPicker.receiveJwtTokenForRedBox({ token: 'INVALID_TOKEN' }); " +
-            "      } " +
-            "    " +
-            "    // Try enhanced chunked function " +
-            "    } else if (window.getPhotoShareJwtTokenForAndroidChunked) { " +
-            "      console.log('🧩 RED BOX: Using enhanced chunked function directly'); " +
-            "      const token = await window.getPhotoShareJwtTokenForAndroidChunked(); " +
-            "      if (token) { " +
-            "        console.log('🧩 RED BOX: ✅ Enhanced chunked function successful (' + token.length + ' chars)'); " +
-            "        await window.Capacitor.Plugins.EventPhotoPicker.receiveJwtTokenForRedBox({ token: 'ENHANCED_SUCCESS_' + token.length + '_CHARS' }); " +
-            "      } else { " +
-            "        console.log('🧩 RED BOX: ❌ Enhanced chunked function failed'); " +
-            "        await window.Capacitor.Plugins.EventPhotoPicker.receiveJwtTokenForRedBox({ token: 'ENHANCED_FAILED' }); " +
-            "      } " +
-            "    " +
-            "    // Fallback: Try existing function (will be truncated but good for testing web team integration) " +
-            "    } else if (window.getPhotoShareJwtTokenForAndroid) { " +
-            "      console.log('⚠️ RED BOX: Using existing function (may be truncated by WebView)'); " +
-            "      const token = await window.getPhotoShareJwtTokenForAndroid(); " +
-            "      console.log('⚠️ RED BOX: Token received (length: ' + (token ? token.length : 0) + ')'); " +
-            "      await window.Capacitor.Plugins.EventPhotoPicker.receiveJwtTokenForRedBox({ " +
-            "        token: token ? 'EXISTING_FUNC_' + token.length + '_CHARS: ' + token.substring(0, 50) + '...' : 'NO_TOKEN' " +
-            "      }); " +
-            "    " +
-            "    // Last resort: Show what functions are missing " +
-            "    } else { " +
-            "      console.log('❌ RED BOX: No JWT functions available'); " +
-            "      await window.Capacitor.Plugins.EventPhotoPicker.receiveJwtTokenForRedBox({ " +
-            "        token: 'MISSING_FUNCTIONS: ' + JSON.stringify(availableFunctions) " +
-            "      }); " +
-            "    } " +
-            "    " +
-            "    return 'DIAGNOSTIC_COMPLETED'; " +
-            "  } catch (error) { " +
-            "    console.error('❌ RED BOX: Error during diagnostics:', error); " +
-            "    await window.Capacitor.Plugins.EventPhotoPicker.receiveJwtTokenForRedBox({ token: 'ERROR: ' + error.message }); " +
-            "    return 'ERROR_OCCURRED'; " +
-            "  } " +
-            "})()",
-            result -> {
-                Log.d("MainActivity", "🔍 RED BOX: JavaScript bridge setup result: " + result);
-            }
-        );
-        }, 500); // Wait 500ms for JavaScript interface to be ready
-    }
     
     // CORE JWT EXTRACTION METHODS: Used by automatic monitoring
     // These methods don't show dialogs, they just extract and store tokens
     
-    private void addJwtTestButtonOverlay() {
-        // First try to use the XML button
-        Button jwtButton = findViewById(R.id.jwt_test_button);
-        if (jwtButton != null) {
-            jwtButton.setOnClickListener(v -> {
-                Log.d("MainActivity", "🔥 JWT Test Button clicked (XML) - testing web team's new functions");
-                testAllJwtFunctions();
-            });
-            Log.d("MainActivity", "✅ JWT test button from XML layout active");
-        } else {
-            Log.w("MainActivity", "⚠️ XML JWT button not found, creating programmatic button");
-            
-            // Create programmatic button as backup
-            try {
-                // Get the root view of the activity (holds the Capacitor WebView)
-                FrameLayout rootView = (FrameLayout) this.getWindow().getDecorView().findViewById(android.R.id.content);
-                
-                // Create the button
-                Button button = new Button(this);
-                int sizePx = (int) (100 * getResources().getDisplayMetrics().density); // 100dp in px
-                FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(sizePx, sizePx, Gravity.CENTER);
-                button.setLayoutParams(params);
-                button.setBackgroundColor(Color.RED);
-                button.setText("🔐 JWT");
-                button.setTextColor(Color.WHITE);
-                
-                // Set click listener
-                button.setOnClickListener(v -> {
-                    Log.d("MainActivity", "🔥 JWT Test Button clicked (programmatic) - testing web team's new functions");
-                    testAllJwtFunctions();
-                });
-                
-                // Add the button overlay
-                rootView.addView(button);
-                Log.d("MainActivity", "✅ Programmatic JWT test button created and added");
-                
-            } catch (Exception e) {
-                Log.e("MainActivity", "❌ Failed to create programmatic button: " + e.getMessage());
-            }
-        }
-    }
     
-    private void testAllJwtFunctions() {
-        WebView webView = bridge.getWebView();
-        StringBuilder results = new StringBuilder();
-        results.append("🔐 TESTING ALL JWT FUNCTIONS\n\n");
-        
-        // Test 1: window.getPhotoShareJwtToken()
-        Log.d("MainActivity", "🧪 Testing getPhotoShareJwtToken()");
-        webView.evaluateJavascript(
-            "if (window.getPhotoShareJwtToken) { window.getPhotoShareJwtToken().then(token => { console.log('getPhotoShareJwtToken result:', token ? 'TOKEN_FOUND_' + token.length + '_chars' : 'null'); }); 'ASYNC_FUNCTION_CALLED'; } else { 'FUNCTION_NOT_FOUND'; }",
-            token1 -> {
-                results.append("1️⃣ getPhotoShareJwtToken(): ").append(token1).append("\n\n");
-                
-                // Test 2: window.getPhotoShareAuthState()
-                Log.d("MainActivity", "🧪 Testing getPhotoShareAuthState()");
-                webView.evaluateJavascript(
-                    "JSON.stringify(window.getPhotoShareAuthState ? window.getPhotoShareAuthState() : 'FUNCTION_NOT_FOUND')",
-                    authState -> {
-                        results.append("2️⃣ getPhotoShareAuthState(): ").append(authState).append("\n\n");
-                        
-                        // Test 3: window.isPhotoShareAuthReady()
-                        Log.d("MainActivity", "🧪 Testing isPhotoShareAuthReady()");
-                        webView.evaluateJavascript(
-                            "window.isPhotoShareAuthReady ? window.isPhotoShareAuthReady() : 'FUNCTION_NOT_FOUND'",
-                            authReady -> {
-                                results.append("3️⃣ isPhotoShareAuthReady(): ").append(authReady).append("\n\n");
-                                
-                                // Test 4: Legacy function - window.getJwtTokenForNativePlugin()
-                                Log.d("MainActivity", "🧪 Testing getJwtTokenForNativePlugin() (legacy)");
-                                webView.evaluateJavascript(
-                                    "if (window.getJwtTokenForNativePlugin) { window.getJwtTokenForNativePlugin().then(token => { console.log('getJwtTokenForNativePlugin result:', token ? 'TOKEN_FOUND_' + token.length + '_chars' : 'null'); }); 'LEGACY_ASYNC_FUNCTION_CALLED'; } else { 'LEGACY_FUNCTION_NOT_FOUND'; }",
-                                    legacyToken -> {
-                                        results.append("4️⃣ getJwtTokenForNativePlugin() (legacy): ").append(legacyToken).append("\n\n");
-                                        
-                                        // Test 5: Check Capacitor Preferences storage
-                                        SharedPreferences capacitorPrefs = getSharedPreferences("CapacitorPreferences", MODE_PRIVATE);
-                                        String capacitorToken = capacitorPrefs.getString("photoshare_jwt_token", null);
-                                        results.append("5️⃣ Capacitor Preferences: ").append(capacitorToken != null ? "TOKEN_FOUND_" + capacitorToken.length() + "_chars" : "null").append("\n\n");
-                                        
-                                        // Test 6: Check traditional SharedPreferences
-                                        SharedPreferences traditionalPrefs = getSharedPreferences("photoshare", MODE_PRIVATE);
-                                        String traditionalToken = traditionalPrefs.getString("current_jwt_token", null);
-                                        results.append("6️⃣ Traditional SharedPreferences: ").append(traditionalToken != null ? "TOKEN_FOUND_" + traditionalToken.length() + "_chars" : "null").append("\n\n");
-                                        
-                                        // Show results
-                                        runOnUiThread(() -> showJwtTestDialog(results.toString()));
-                                    }
-                                );
-                            }
-                        );
-                    }
-                );
-            }
-        );
+    
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
     }
 }

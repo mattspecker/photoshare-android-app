@@ -44,10 +44,18 @@ import com.getcapacitor.annotation.CapacitorPlugin;
     }
 )
 public class EventPhotoPickerPlugin extends Plugin {
+    
+    // Static reference to bridge for access from EventPhotoPickerActivity
+    private static com.getcapacitor.Bridge lastBridge;
+    
+    public static com.getcapacitor.Bridge getLastBridge() {
+        return lastBridge;
+    }
 
     @Override
     public void load() {
         super.load();
+        lastBridge = getBridge(); // Store bridge reference for activity access
         Log.d("EventPhotoPicker", "🔥 EventPhotoPicker Plugin Loading");
     }
 
@@ -595,37 +603,6 @@ public class EventPhotoPickerPlugin extends Plugin {
         Log.d("EventPhotoPicker", "💾 Stored fresh JWT token for upload use");
     }
 
-    @PluginMethod
-    public void receiveJwtTokenForRedBox(PluginCall call) {
-        String token = call.getString("token");
-        Log.d("EventPhotoPicker", "🔍 PLUGIN: Received JWT token via plugin method (length: " + (token != null ? token.length() : 0) + ")");
-        
-        if (token != null && !token.equals("null") && !token.equals("FUNCTION_NOT_FOUND")) {
-            String preview = token.length() > 40 ? 
-                token.substring(0, 20) + "..." + token.substring(token.length() - 20) : 
-                token;
-            Log.d("EventPhotoPicker", "🔍 PLUGIN: Token preview: " + preview);
-            
-            String[] parts = token.split("\\.");
-            Log.d("EventPhotoPicker", "🔍 PLUGIN: Token parts: " + parts.length + " (should be 3)");
-            
-            // Show dialog with token info
-            getActivity().runOnUiThread(() -> {
-                String tokenInfo = "🔍 JWT TOKEN VIA CAPACITOR PLUGIN:\n" +
-                                  "Length: " + token.length() + "\n" +
-                                  "Parts: " + parts.length + " (should be 3)\n" +
-                                  "Preview: " + preview;
-                                  
-                new AlertDialog.Builder(getActivity())
-                    .setTitle("🔐 JWT Token via Plugin")
-                    .setMessage(tokenInfo)
-                    .setPositiveButton("OK", null)
-                    .show();
-            });
-        }
-        
-        call.resolve();
-    }
 
     @PluginMethod
     public void openEventPhotoPicker(PluginCall call) {
