@@ -15,23 +15,60 @@ import android.webkit.JavascriptInterface;
 import android.content.Context;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.Plugin;
+import io.capawesome.capacitorjs.plugins.mlkit.barcodescanning.BarcodeScannerPlugin;
+import app.photoshare.EventPhotoPickerPlugin;
+import java.util.ArrayList;
 
 public class MainActivity extends BridgeActivity {
     private static final String TAG = "MainActivity";
     
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        // Get current timestamp for build version tracking
+        String buildTimestamp = java.time.LocalDateTime.now().toString();
+        Log.d("MainActivity", "🚀 APP LAUNCH - version = " + buildTimestamp);
+        
+        Log.d("MainActivity", "=== PLUGIN REGISTRATION STARTING ===");
+        
+        // Call super.onCreate to initialize Capacitor bridge
         super.onCreate(savedInstanceState);
         
-        // Register EventPhotoPicker plugin only
-        Log.d("MainActivity", "=== REGISTERING EVENTPHOTOPICKER PLUGIN ===");
+        // Register EventPhotoPicker plugin using getBridge() method
         try {
-            Log.d("MainActivity", "Registering EventPhotoPickerPlugin...");
-            registerPlugin(EventPhotoPickerPlugin.class);
-            Log.d("MainActivity", "✅ EventPhotoPickerPlugin registered successfully");
+            Log.d("MainActivity", "Registering EventPhotoPickerPlugin via getBridge()...");
+            this.getBridge().registerPlugin(EventPhotoPickerPlugin.class);
+            Log.d("MainActivity", "✅ EventPhotoPickerPlugin registered successfully via getBridge()");
+            Log.d("MainActivity", "🔌 EventPhotoPicker loads here - plugin should now be available to JavaScript");
         } catch (Exception e) {
-            Log.e("MainActivity", "❌ Failed to register EventPhotoPickerPlugin: " + e.getMessage(), e);
+            Log.e("MainActivity", "❌ getBridge() registration failed, trying direct registerPlugin()");
+            Log.e("MainActivity", "getBridge() error: " + e.getMessage(), e);
+            
+            // Fallback to direct registration
+            try {
+                Log.d("MainActivity", "Fallback: Registering EventPhotoPickerPlugin directly...");
+                registerPlugin(EventPhotoPickerPlugin.class);
+                Log.d("MainActivity", "✅ EventPhotoPickerPlugin registered successfully (direct)");
+            } catch (Exception e2) {
+                Log.e("MainActivity", "❌ Both registration methods failed: " + e2.getMessage(), e2);
+            }
         }
+        
+        // Register BarcodeScannerPlugin using getBridge() method
+        try {
+            Log.d("MainActivity", "Registering BarcodeScannerPlugin via getBridge()...");
+            this.getBridge().registerPlugin(BarcodeScannerPlugin.class);
+            Log.d("MainActivity", "✅ BarcodeScannerPlugin registered successfully via getBridge()");
+        } catch (Exception e) {
+            Log.e("MainActivity", "❌ Failed to register BarcodeScannerPlugin via getBridge(): " + e.getMessage(), e);
+            // Fallback to direct registration
+            try {
+                registerPlugin(BarcodeScannerPlugin.class);
+                Log.d("MainActivity", "✅ BarcodeScannerPlugin registered successfully (direct)");
+            } catch (Exception e2) {
+                Log.e("MainActivity", "❌ BarcodeScannerPlugin registration failed completely: " + e2.getMessage(), e2);
+            }
+        }
+        
         Log.d("MainActivity", "=== PLUGIN REGISTRATION COMPLETE ===");
         
         // Initialize safe area handling
@@ -45,10 +82,10 @@ public class MainActivity extends BridgeActivity {
         // Get the bridge WebView
         WebView webView = bridge.getWebView();
         
-        // Inject JavaScript to handle safe area insets
+        // Inject JavaScript to handle safe area insets and barcode scanner CSS
         String safeAreaScript = 
             "window.addEventListener('DOMContentLoaded', function() {" +
-            "  // Apply safe area CSS variables" +
+            "  // Apply safe area CSS variables and barcode scanner styles" +
             "  const style = document.createElement('style');" +
             "  style.textContent = `" +
             "    body {" +
@@ -63,19 +100,34 @@ public class MainActivity extends BridgeActivity {
             "    .content, .main-content, .app-content {" +
             "      margin-top: var(--safe-area-inset-top, 0px) !important;" +
             "    }" +
+            "    /* Barcode Scanner CSS - Simplified approach per MLKit docs */" +
+            "    body.barcode-scanner-active {" +
+            "      visibility: hidden !important;" +
+            "      background: black !important;" +
+            "    }" +
+            "    body.barcode-scanner-active .barcode-scanner-modal {" +
+            "      visibility: visible !important;" +
+            "      position: fixed !important;" +
+            "      top: 0 !important;" +
+            "      left: 0 !important;" +
+            "      width: 100vw !important;" +
+            "      height: 100vh !important;" +
+            "      z-index: 10000 !important;" +
+            "      background: transparent !important;" +
+            "    }" +
             "  `;" +
             "  document.head.appendChild(style);" +
-            "  console.log('Safe Area CSS injected');" +
+            "  console.log('Safe Area CSS and Barcode Scanner CSS injected');" +
             "});";
         
-        // Register EventPhotoPicker plugin only
-        String photoInterceptorScript = 
-            "console.log('🚀 EventPhotoPicker plugin registration script loaded');" +
+        // Register plugins
+        String pluginRegistrationScript = 
+            "console.log('🚀 Plugin registration script loaded');" +
             "" +
-            "// Function to register EventPhotoPicker plugin" +
-            "function registerEventPhotoPickerPlugin() {" +
+            "// Function to register plugins" +
+            "function registerPlugins() {" +
             "  try {" +
-            "    console.log('🔌 Attempting to register EventPhotoPicker plugin...');" +
+            "    console.log('🔌 Attempting to register plugins...');" +
             "    " +
             "    if (!window.Capacitor) {" +
             "      console.log('❌ Capacitor not available');" +
@@ -91,7 +143,11 @@ public class MainActivity extends BridgeActivity {
             "    console.log('📱 Registering EventPhotoPicker plugin...');" +
             "    const EventPhotoPicker = window.Capacitor.registerPlugin('EventPhotoPicker');" +
             "    " +
-            "    // Test the plugin immediately" +
+            "    // Register BarcodeScanner plugin" +
+            "    console.log('📷 Registering BarcodeScanner plugin...');" +
+            "    const BarcodeScanner = window.Capacitor.registerPlugin('BarcodeScanner');" +
+            "    " +
+            "    // Test EventPhotoPicker plugin" +
             "    console.log('🧪 Testing EventPhotoPicker plugin...');" +
             "    EventPhotoPicker.testPlugin().then(() => {" +
             "      console.log('✅ EventPhotoPicker plugin test successful');" +
@@ -100,11 +156,15 @@ public class MainActivity extends BridgeActivity {
             "      console.error('❌ EventPhotoPicker plugin test failed:', e);" +
             "    });" +
             "    " +
-            "    console.log('✅ EventPhotoPicker registration complete');" +
+            "    // Test BarcodeScanner plugin" +
+            "    console.log('🧪 Testing BarcodeScanner plugin...');" +
+            "    console.log('✅ BarcodeScanner available at window.Capacitor.Plugins.BarcodeScanner');" +
+            "    " +
+            "    console.log('✅ Plugin registration complete');" +
             "    return true;" +
             "    " +
             "  } catch (error) {" +
-            "    console.error('❌ EventPhotoPicker registration error:', error);" +
+            "    console.error('❌ Plugin registration error:', error);" +
             "    return false;" +
             "  }" +
             "}" +
@@ -115,8 +175,8 @@ public class MainActivity extends BridgeActivity {
             "  registrationAttempts++;" +
             "  console.log('🔄 Registration attempt', registrationAttempts);" +
             "  " +
-            "  if (registerEventPhotoPickerPlugin()) {" +
-            "    console.log('✅ EventPhotoPicker registered successfully on attempt', registrationAttempts);" +
+            "  if (registerPlugins()) {" +
+            "    console.log('✅ Plugins registered successfully on attempt', registrationAttempts);" +
             "    return;" +
             "  }" +
             "  " +
@@ -124,17 +184,38 @@ public class MainActivity extends BridgeActivity {
             "  if (registrationAttempts < 10) {" +
             "    setTimeout(attemptRegistration, registrationAttempts * 500);" +
             "  } else {" +
-            "    console.error('❌ Failed to register EventPhotoPicker after 10 attempts');" +
+            "    console.error('❌ Failed to register plugins after 10 attempts');" +
             "  }" +
             "}" +
             "" +
             "// Start registration attempts" +
             "attemptRegistration();";
         
-        // Execute both scripts
+        // Execute scripts with immediate plugin setup
         webView.post(() -> {
+            // First log the build version to console
+            String consoleVersionScript = 
+                "console.log('🚀 APP LAUNCH - version = " + java.time.LocalDateTime.now().toString() + "');";
+            webView.evaluateJavascript(consoleVersionScript, null);
+            
+            // Then ensure plugins are immediately available
+            webView.evaluateJavascript(
+                "console.log('🚀 IMMEDIATE PLUGIN SETUP STARTING...'); " +
+                "if (window.Capacitor && window.Capacitor.Plugins) { " +
+                "  console.log('📋 Available plugins before registration:', Object.keys(window.Capacitor.Plugins)); " +
+                "  if (window.Capacitor.Plugins.EventPhotoPicker) { " +
+                "    console.log('✅ EventPhotoPicker already available!'); " +
+                "  } else { " +
+                "    console.log('❌ EventPhotoPicker not found in initial plugins'); " +
+                "  } " +
+                "} else { " +
+                "  console.log('❌ Capacitor not ready yet'); " +
+                "}",
+                null
+            );
+            
             webView.evaluateJavascript(safeAreaScript, null);
-            webView.evaluateJavascript(photoInterceptorScript, null);
+            webView.evaluateJavascript(pluginRegistrationScript, null);
             
             // Add console-accessible JWT test function
             String consoleTestScript = 
@@ -278,6 +359,27 @@ public class MainActivity extends BridgeActivity {
         setupAndroidJwtBridge();
         
         Log.d("MainActivity", "✅ JWT Token monitoring setup complete");
+        
+        // Final plugin availability check after all initialization
+        getBridge().getWebView().post(() -> {
+            getBridge().getWebView().evaluateJavascript(
+                "setTimeout(() => {" +
+                "  console.log('🔍 FINAL PLUGIN AVAILABILITY CHECK:');" +
+                "  console.log('📋 Available Capacitor plugins:', Object.keys(window.Capacitor?.Plugins || {}));" +
+                "  if (window.Capacitor?.Plugins?.EventPhotoPicker) {" +
+                "    console.log('✅ SUCCESS: EventPhotoPicker is available in Capacitor.Plugins');" +
+                "    window.Capacitor.Plugins.EventPhotoPicker.testPlugin().then(result => {" +
+                "      console.log('🧪 EventPhotoPicker test result:', result);" +
+                "    }).catch(error => {" +
+                "      console.error('❌ EventPhotoPicker test failed:', error);" +
+                "    });" +
+                "  } else {" +
+                "    console.error('❌ FAILED: EventPhotoPicker is NOT available in Capacitor.Plugins');" +
+                "  }" +
+                "}, 3000);", // Wait 3 seconds for everything to initialize
+                null
+            );
+        });
     }
     
     private void setupAndroidJwtBridge() {

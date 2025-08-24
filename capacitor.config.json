@@ -18,8 +18,11 @@
     "Camera": {
       "permissions": ["camera", "photos"]
     },
-    "BarcodeScanning": {
+    "BarcodeScanner": {
       "cameraDirection": "back"
+    },
+    "EventPhotoPicker": {
+      "enabled": true
     },
     "FirebaseAuthentication": {
       "skipNativeAuth": false,

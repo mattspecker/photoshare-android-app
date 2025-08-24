@@ -9,7 +9,7 @@ import { Device } from '@capacitor/device';
 import { App } from '@capacitor/app';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 
-// Register custom EventPhotoPicker plugin
+// Register custom plugins
 const EventPhotoPicker = registerPlugin('EventPhotoPicker');
 
 // Initialize Google Auth (call this when app starts)
@@ -113,13 +113,7 @@ export async function selectFromGallery() {
 // EventPhotoPicker Plugin Functions
 export async function openEventPhotoPicker(options = {}) {
   try {
-    const { Capacitor } = await import('@capacitor/core');
-    
-    if (!Capacitor.isPluginAvailable('EventPhotoPicker')) {
-      throw new Error('EventPhotoPicker plugin is not available');
-    }
-
-    const result = await Capacitor.Plugins.EventPhotoPicker.openEventPhotoPicker(options);
+    const result = await EventPhotoPicker.openEventPhotoPicker(options);
     return result;
   } catch (error) {
     console.error('Error opening EventPhotoPicker:', error);
@@ -127,44 +121,61 @@ export async function openEventPhotoPicker(options = {}) {
   }
 }
 
-export async function isEventPhotoPickerAvailable() {
-  try {
-    const { Capacitor } = await import('@capacitor/core');
-    return Capacitor.isPluginAvailable('EventPhotoPicker');
-  } catch (error) {
-    console.error('Error checking EventPhotoPicker availability:', error);
-    return false;
-  }
-}
 
-// UploadManager Plugin Functions
-export async function testUploadManager() {
+export async function checkEventPhotoPickerPermission() {
   try {
-    const { Capacitor } = await import('@capacitor/core');
-    
-    if (!Capacitor.isPluginAvailable('UploadManager')) {
-      throw new Error('UploadManager plugin is not available');
-    }
-
-    const result = await Capacitor.Plugins.UploadManager.testConnection();
+    const result = await EventPhotoPicker.checkMediaPermission();
     return result;
   } catch (error) {
-    console.error('Error testing UploadManager:', error);
+    console.error('Error checking EventPhotoPicker permission:', error);
     throw error;
   }
 }
 
-export async function isUploadManagerAvailable() {
+export async function requestEventPhotoPickerPermission() {
   try {
-    const { Capacitor } = await import('@capacitor/core');
-    return Capacitor.isPluginAvailable('UploadManager');
+    const result = await EventPhotoPicker.requestMediaPermission();
+    return result;
   } catch (error) {
-    console.error('Error checking UploadManager availability:', error);
+    console.error('Error requesting EventPhotoPicker permission:', error);
+    throw error;
+  }
+}
+
+export async function checkEventPhotoPickerPermissions() {
+  try {
+    const result = await EventPhotoPicker.checkPermissions();
+    return result;
+  } catch (error) {
+    console.error('Error checking EventPhotoPicker permissions:', error);
+    throw error;
+  }
+}
+
+export async function requestEventPhotoPickerPermissions() {
+  try {
+    const result = await EventPhotoPicker.requestPermissions();
+    return result;
+  } catch (error) {
+    console.error('Error requesting EventPhotoPicker permissions:', error);
+    throw error;
+  }
+}
+
+export async function isEventPhotoPickerAvailable() {
+  try {
+    // Test if the plugin is available by calling a method
+    await EventPhotoPicker.testPlugin();
+    return true;
+  } catch (error) {
+    console.error('EventPhotoPicker not available:', error);
     return false;
   }
 }
 
-// Test function for browser console (for Stage 1 verification)
+// UploadManager functions removed - using EventPhotoPicker only
+
+// Test function for browser console (for Stage 5 verification)
 export async function testEventPhotoPicker() {
   try {
     console.log('Testing EventPhotoPicker...');
@@ -172,12 +183,24 @@ export async function testEventPhotoPicker() {
     console.log('Plugin available:', isAvailable);
     
     if (isAvailable) {
+      // Test permission checking
+      console.log('Checking permission...');
+      const permissionStatus = await checkEventPhotoPickerPermission();
+      console.log('Permission status:', permissionStatus);
+      
+      if (!permissionStatus.granted) {
+        console.log('Permission not granted, requesting...');
+        const requestResult = await requestEventPhotoPickerPermission();
+        console.log('Permission request result:', requestResult);
+        return requestResult;
+      }
+      
       console.log('Opening EventPhotoPicker...');
       const result = await openEventPhotoPicker({
         eventId: 'test-event-123',
         eventName: 'Test Event',
-        startTime: '2024-01-15T10:00:00.000Z',
-        endTime: '2024-01-15T18:00:00.000Z'
+        startTime: '2025-08-19T10:00:00.000Z',
+        endTime: '2025-08-19T18:00:00.000Z'
       });
       console.log('EventPhotoPicker result:', result);
       return result;
@@ -247,65 +270,37 @@ export async function requestCameraPermissionsWithGuidance() {
   }
 }
 
-// QR Code Scanner Functions (using Capacitor MLKit Barcode Scanning with proper camera initialization)
-let scannerListener = null;
-
+// QR Code Scanner Functions (using MLKit Barcode Scanning)
 export async function scanQRCode() {
   try {
-    console.log('🔍 Starting QR code scan with native camera display...');
+    // Check current camera permissions
+    let permissions = await Camera.checkPermissions();
     
-    // Use Capacitor to access the BarcodeScanning plugin
-    const { Capacitor } = await import('@capacitor/core');
-    
-    if (!Capacitor.isPluginAvailable('BarcodeScanner')) {
-      throw new Error('BarcodeScanner plugin is not available');
-    }
-
-    // Check if Google Barcode Scanner module is available
-    try {
-      const moduleAvailable = await Capacitor.Plugins.BarcodeScanner.isGoogleBarcodeScannerModuleAvailable();
-      console.log('📱 Google Barcode Scanner module available:', moduleAvailable);
+    if (permissions.camera !== 'granted') {
+      console.log('Camera permission not granted for barcode scanning, requesting...');
       
-      if (!moduleAvailable.available) {
-        console.log('📱 Installing Google Barcode Scanner module...');
-        await Capacitor.Plugins.BarcodeScanner.installGoogleBarcodeScannerModule();
-        console.log('✅ Google Barcode Scanner module installed');
-      }
-    } catch (moduleError) {
-      console.warn('⚠️ Could not check/install Google Barcode Scanner module:', moduleError);
-    }
-
-    // Check permissions first
-    const permissionResult = await Capacitor.Plugins.BarcodeScanner.checkPermissions();
-    console.log('📷 Camera permissions:', permissionResult);
-    
-    if (permissionResult.camera !== 'granted') {
-      console.log('📷 Requesting camera permissions...');
-      const requestResult = await Capacitor.Plugins.BarcodeScanner.requestPermissions();
+      // Force request camera permission
+      const requestResult = await Camera.requestPermissions({ permissions: ['camera'] });
       
       if (requestResult.camera !== 'granted') {
-        throw new Error('Camera access required for QR scanning. Please enable Camera permission in Settings.');
+        // Check final permission state
+        const finalCheck = await Camera.checkPermissions();
+        
+        if (finalCheck.camera === 'denied') {
+          throw new Error('Camera access required for QR scanning. Please go to Settings > Apps > PhotoShare > Permissions and enable Camera access.');
+        }
       }
     }
-
-    // Use the simple scan() method instead of startScan() + listener approach
-    console.log('📷 Starting native barcode scan...');
-    const result = await Capacitor.Plugins.BarcodeScanner.scan({
-      formats: [1] // QR_CODE format
-    });
     
-    console.log('📷 Scan result:', result);
+    const result = await BarcodeScanner.scan();
     
     if (result.barcodes && result.barcodes.length > 0) {
-      const qrValue = result.barcodes[0].displayValue || result.barcodes[0].rawValue;
-      console.log('✅ QR code found:', qrValue);
-      return qrValue;
+      return result.barcodes[0].displayValue;
     } else {
       throw new Error('No QR code found');
     }
-
   } catch (error) {
-    console.error('❌ Error scanning QR code:', error);
+    console.error('Error scanning QR code:', error);
     
     // If it's a permission error, provide actionable guidance with Settings option
     if (error.message.includes('permission') || error.message.includes('denied')) {
@@ -319,36 +314,17 @@ export async function scanQRCode() {
 
 export async function stopQRScan() {
   try {
-    console.log('🛑 Stopping QR scan...');
-    
-    const { Capacitor } = await import('@capacitor/core');
-    
-    if (Capacitor.isPluginAvailable('BarcodeScanner')) {
-      // Stop the scan
-      await Capacitor.Plugins.BarcodeScanner.stopScan();
-      console.log('✅ Barcode scan stopped');
-    } else {
-      console.log('⚠️ BarcodeScanner plugin not available');
-    }
+    // MLKit barcode scanner handles stopping automatically
+    console.log('Barcode scan stopped');
   } catch (error) {
-    console.error('❌ Error stopping QR scan:', error);
+    console.error('Error stopping QR scan:', error);
   }
 }
 
 // Check camera permissions specifically for barcode scanning
 export async function checkBarcodePermissions() {
   try {
-    const { Capacitor } = await import('@capacitor/core');
-    
-    if (!Capacitor.isPluginAvailable('BarcodeScanner')) {
-      return {
-        camera: 'denied',
-        canScanBarcodes: false,
-        error: 'BarcodeScanner plugin not available'
-      };
-    }
-
-    const permissions = await Capacitor.Plugins.BarcodeScanner.checkPermissions();
+    const permissions = await Camera.checkPermissions();
     return {
       camera: permissions.camera,
       canScanBarcodes: permissions.camera === 'granted'
@@ -362,25 +338,14 @@ export async function checkBarcodePermissions() {
 // Request camera permissions specifically for barcode scanning
 export async function requestBarcodePermissions() {
   try {
-    console.log('📷 Requesting camera permissions for barcode scanning...');
-    
-    const { Capacitor } = await import('@capacitor/core');
-    
-    if (!Capacitor.isPluginAvailable('BarcodeScanner')) {
-      return {
-        camera: 'denied',
-        canScanBarcodes: false,
-        error: 'BarcodeScanner plugin not available'
-      };
-    }
-
-    const permissions = await Capacitor.Plugins.BarcodeScanner.requestPermissions();
+    console.log('Requesting camera permissions for barcode scanning...');
+    const permissions = await Camera.requestPermissions();
     return {
       camera: permissions.camera,
       canScanBarcodes: permissions.camera === 'granted'
     };
   } catch (error) {
-    console.error('❌ Error requesting barcode permissions:', error);
+    console.error('Error requesting barcode permissions:', error);
     throw error;
   }
 }
@@ -625,39 +590,13 @@ export async function openAppPermissions() {
   }
 }
 
-// Test QR Scanner (for debugging)
-export async function testQRScanner() {
-  try {
-    console.log('🔍 Testing QR Scanner...');
-    
-    const { Capacitor } = await import('@capacitor/core');
-    
-    // Check if plugin is available
-    const isAvailable = Capacitor.isPluginAvailable('BarcodeScanner');
-    console.log('📷 BarcodeScanner plugin available:', isAvailable);
-    
-    if (!isAvailable) {
-      return { error: 'BarcodeScanner plugin not available' };
-    }
-    
-    // Check permissions
-    const permissionStatus = await checkBarcodePermissions();
-    console.log('📷 Permission status:', permissionStatus);
-    
-    return {
-      success: true,
-      pluginAvailable: isAvailable,
-      permissions: permissionStatus,
-      message: 'QR Scanner is ready! Use scanQRCode() to start scanning.'
-    };
-  } catch (error) {
-    console.error('❌ QR Scanner test failed:', error);
-    return { error: error.message };
-  }
-}
-
 // Make functions available globally for web interface
 if (typeof window !== 'undefined') {
+  // Make the registered plugins available on window.Capacitor.Plugins
+  if (window.Capacitor && window.Capacitor.Plugins) {
+    window.Capacitor.Plugins.EventPhotoPicker = EventPhotoPicker;
+  }
+  
   window.CapacitorPlugins = {
     Camera: {
       takePicture,
@@ -669,17 +608,16 @@ if (typeof window !== 'undefined') {
       openEventPhotoPicker,
       isAvailable: isEventPhotoPickerAvailable,
       test: testEventPhotoPicker,
-    },
-    UploadManager: {
-      testConnection: testUploadManager,
-      isAvailable: isUploadManagerAvailable,
+      checkPermission: checkEventPhotoPickerPermission,
+      requestPermission: requestEventPhotoPickerPermission,
+      checkPermissions: checkEventPhotoPickerPermissions, // Standard Capacitor method
+      requestPermissions: requestEventPhotoPickerPermissions, // Standard Capacitor method
     },
     QRScanner: {
       scanQRCode,
       stopQRScan,
       checkPermissions: checkBarcodePermissions,
       requestPermissions: requestBarcodePermissions,
-      test: testQRScanner,
     },
     GoogleAuth: {
       initialize: initializeGoogleAuth,
