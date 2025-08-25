@@ -20,7 +20,7 @@
 		"classpath": "com.capacitorjs.plugins.device.DevicePlugin"
 	},
 	{
-		"pkg": "event-photo-picker",
-		"classpath": "app.photoshare.EventPhotoPickerPlugin"
+		"pkg": "@capacitor/push-notifications",
+		"classpath": "com.capacitorjs.plugins.pushnotifications.PushNotificationsPlugin"
 	}
 ]

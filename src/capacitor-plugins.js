@@ -8,6 +8,7 @@ import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import { Device } from '@capacitor/device';
 import { App } from '@capacitor/app';
 import { Capacitor, registerPlugin } from '@capacitor/core';
+import { PushNotifications } from '@capacitor/push-notifications';
 
 // Register custom EventPhotoPicker plugin
 const EventPhotoPicker = registerPlugin('EventPhotoPicker');
@@ -656,6 +657,190 @@ export async function testQRScanner() {
   }
 }
 
+// Simple Push Notifications - Just get token and handle notifications
+let fcmToken = null;
+let notificationContext = null; // Store context for when token is received
+
+export async function initializePushNotifications(context = null) {
+  try {
+    console.log('🔔 [PUSH INIT] Starting push notification setup...');
+    console.log('🔔 [PUSH INIT] Function called with context:', context);
+    
+    // Store context for later use when token is received
+    notificationContext = context;
+    
+    // Check if we're on a mobile platform
+    const { Capacitor } = await import('@capacitor/core');
+    console.log('🔔 [PUSH INIT] Platform:', Capacitor.getPlatform());
+    console.log('🔔 [PUSH INIT] Is native app:', Capacitor.isNativePlatform());
+    
+    if (!Capacitor.isPluginAvailable('PushNotifications')) {
+      console.log('❌ [PUSH INIT] PushNotifications plugin not available');
+      return { success: false, reason: 'plugin_unavailable' };
+    }
+    console.log('✅ [PUSH INIT] PushNotifications plugin available');
+    
+    // Check current permissions first
+    console.log('🔔 [PUSH INIT] Checking current permissions...');
+    const currentPermissions = await PushNotifications.checkPermissions();
+    console.log('🔔 [PUSH INIT] Current permissions:', currentPermissions);
+    
+    // If already granted, proceed directly
+    if (currentPermissions.receive === 'granted') {
+      console.log('✅ [PUSH INIT] Permissions already granted, proceeding with registration');
+    } else if (currentPermissions.receive === 'denied') {
+      console.log('❌ [PUSH INIT] Permissions previously denied by user');
+      return { success: false, reason: 'permission_denied' };
+    } else {
+      // Need to request permission - this will show the system dialog
+      console.log('🔔 [PUSH INIT] Requesting permissions from user...');
+      const permissionResult = await PushNotifications.requestPermissions();
+      console.log('🔔 [PUSH INIT] Permission result:', permissionResult);
+      
+      if (permissionResult.receive !== 'granted') {
+        console.log('❌ [PUSH INIT] User declined push notifications:', permissionResult.receive);
+        return { success: false, reason: 'user_declined', permissions: permissionResult };
+      }
+    }
+    
+    // Register with FCM to get token
+    console.log('🔔 [PUSH INIT] Registering with FCM to get token...');
+    await PushNotifications.register();
+    console.log('✅ [PUSH INIT] FCM registration initiated');
+    
+    // Set up listeners that will handle the token
+    console.log('🔔 [PUSH INIT] Setting up token and notification listeners...');
+    setupSimplePushListeners();
+    console.log('✅ [PUSH INIT] Listeners configured');
+    
+    console.log('✅ [PUSH INIT] Complete - FCM token will be received via listener');
+    return { success: true, status: 'waiting_for_token' };
+  } catch (error) {
+    console.error('❌ [PUSH INIT] Setup error:', error);
+    return { success: false, reason: 'setup_error', error: error.message };
+  }
+}
+
+function setupSimplePushListeners() {
+  console.log('🔔 [LISTENERS] Setting up push notification listeners...');
+  
+  // Get FCM token
+  PushNotifications.addListener('registration', (token) => {
+    console.log('🎯 [FCM TOKEN] *** FIREBASE TOKEN RECEIVED ***');
+    console.log('🎯 [FCM TOKEN] Token:', token.value);
+    console.log('🎯 [FCM TOKEN] Token length:', token.value?.length);
+    fcmToken = token.value;
+    
+    // Make token available to web
+    window.fcmToken = token.value;
+    if (window.localStorage) {
+      window.localStorage.setItem('fcm_token', token.value);
+      console.log('💾 [FCM TOKEN] Stored in localStorage');
+    }
+    
+    // Call the web's useMobileTokenHandler function for general initialization
+    if (typeof window.useMobileTokenHandler === 'function') {
+      console.log('🔗 [FCM TOKEN] Calling useMobileTokenHandler...');
+      try {
+        // Build params for useMobileTokenHandler
+        const params = {
+          token: token.value,
+          platform: 'android',
+          ...(notificationContext || {}) // Include any context passed during initialization
+        };
+        
+        // Default params if no context provided (general app initialization)
+        if (!notificationContext) {
+          params.eventId = null; // null for general app initialization
+          params.eventName = 'PhotoShare App';
+          params.enabled = true;
+        }
+        
+        console.log('🔗 [FCM TOKEN] Calling with params:', params);
+        await window.useMobileTokenHandler(params);
+        console.log('✅ [FCM TOKEN] Token registered with PhotoShare web via useMobileTokenHandler');
+      } catch (error) {
+        console.error('❌ [FCM TOKEN] Error calling useMobileTokenHandler:', error);
+      }
+    } else if (typeof window.registerFCMToken === 'function') {
+      console.log('🔗 [FCM TOKEN] Fallback: Calling legacy registerFCMToken...');
+      try {
+        window.registerFCMToken(token.value, 'android');
+        console.log('✅ [FCM TOKEN] Token registered with PhotoShare web via legacy method');
+      } catch (error) {
+        console.error('❌ [FCM TOKEN] Error calling registerFCMToken:', error);
+      }
+    } else {
+      console.log('⚠️ [FCM TOKEN] Neither useMobileTokenHandler nor registerFCMToken found');
+      console.log('🔍 [FCM TOKEN] Available window functions:', Object.keys(window).filter(k => k.includes('register') || k.includes('fcm') || k.includes('token') || k.includes('Firebase') || k.includes('firebase') || k.includes('Mobile') || k.includes('mobile')));
+    }
+    
+    console.log('✅ [FCM TOKEN] Token ready for PhotoShare web to use');
+  });
+  
+  // Add registration error listener
+  PushNotifications.addListener('registrationError', (error) => {
+    console.error('❌ [FCM ERROR] Registration failed:', error);
+  });
+  
+  // Handle notification tap
+  PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
+    console.log('👆 Notification tapped:', action);
+    
+    const data = action.notification?.data || {};
+    if (data.eventId) {
+      window.location.href = `/event/${data.eventId}`;
+    } else if (data.photoId) {
+      window.location.href = `/photo/${data.photoId}`;
+    } else if (data.url) {
+      window.location.href = data.url;
+    }
+  });
+  
+  // Just log foreground notifications
+  PushNotifications.addListener('pushNotificationReceived', (notification) => {
+    console.log('📬 Notification received:', notification.title);
+  });
+}
+
+export function getFCMToken() {
+  return fcmToken || window.fcmToken || window.localStorage?.getItem('fcm_token');
+}
+
+export async function checkPushPermissions() {
+  try {
+    return await PushNotifications.checkPermissions();
+  } catch (error) {
+    console.error('Error checking push permissions:', error);
+    return { receive: 'denied' };
+  }
+}
+
+// Helper function to check if push notifications can be used
+export async function canUsePushNotifications() {
+  try {
+    const { Capacitor } = await import('@capacitor/core');
+    
+    // Check if plugin is available
+    if (!Capacitor.isPluginAvailable('PushNotifications')) {
+      return { supported: false, reason: 'plugin_unavailable' };
+    }
+    
+    // Check permissions
+    const permissions = await PushNotifications.checkPermissions();
+    if (permissions.receive === 'granted') {
+      return { supported: true, permissions };
+    } else if (permissions.receive === 'denied') {
+      return { supported: false, reason: 'permission_denied', permissions };
+    } else {
+      return { supported: false, reason: 'permission_not_requested', permissions };
+    }
+  } catch (error) {
+    console.error('Error checking push notification support:', error);
+    return { supported: false, reason: 'check_error', error: error.message };
+  }
+}
+
 // Make functions available globally for web interface
 if (typeof window !== 'undefined') {
   window.CapacitorPlugins = {
@@ -705,6 +890,18 @@ if (typeof window !== 'undefined') {
     Settings: {
       openAppSettings,
       openAppPermissions,
+    },
+    PushNotifications: {
+      initialize: initializePushNotifications,
+      getFCMToken,
+      checkPermissions: checkPushPermissions,
+      canUsePushNotifications,
+      requestPermissions: async () => {
+        return await PushNotifications.requestPermissions();
+      },
+      register: async () => {
+        return await PushNotifications.register();
+      }
     },
   };
 }

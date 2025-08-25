@@ -41,11 +41,32 @@
 
         <!-- MLKit Barcode Scanning Dependencies -->
         <meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="barcode_ui"/>
+        
+        <!-- Firebase Messaging Service -->
+        <service android:name="com.google.firebase.messaging.FirebaseMessagingService" android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        
+        <!-- Firebase Messaging default settings -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@mipmap/ic_launcher" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/colorPrimary" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="photoshare_default_channel" />
     </application>
 
     <!-- Permissions -->
     
     <uses-permission android:name="android.permission.INTERNET" />
+    
+    <!-- Push Notifications permission for Android 13+ -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     
     <!-- Camera permissions -->
     <uses-permission android:name="android.permission.CAMERA" />

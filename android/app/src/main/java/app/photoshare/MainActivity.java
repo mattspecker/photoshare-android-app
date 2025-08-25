@@ -17,6 +17,7 @@ import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.Plugin;
 import io.capawesome.capacitorjs.plugins.mlkit.barcodescanning.BarcodeScannerPlugin;
 import app.photoshare.EventPhotoPickerPlugin;
+import com.capacitorjs.plugins.pushnotifications.PushNotificationsPlugin;
 import java.util.ArrayList;
 
 public class MainActivity extends BridgeActivity {
@@ -66,6 +67,22 @@ public class MainActivity extends BridgeActivity {
                 Log.d("MainActivity", "✅ BarcodeScannerPlugin registered successfully (direct)");
             } catch (Exception e2) {
                 Log.e("MainActivity", "❌ BarcodeScannerPlugin registration failed completely: " + e2.getMessage(), e2);
+            }
+        }
+        
+        // Register PushNotifications plugin explicitly
+        try {
+            Log.d("MainActivity", "Registering PushNotificationsPlugin via getBridge()...");
+            this.getBridge().registerPlugin(PushNotificationsPlugin.class);
+            Log.d("MainActivity", "✅ PushNotificationsPlugin registered successfully via getBridge()");
+        } catch (Exception e) {
+            Log.e("MainActivity", "❌ Failed to register PushNotificationsPlugin via getBridge(): " + e.getMessage(), e);
+            // Fallback to direct registration
+            try {
+                registerPlugin(PushNotificationsPlugin.class);
+                Log.d("MainActivity", "✅ PushNotificationsPlugin registered successfully (direct)");
+            } catch (Exception e2) {
+                Log.e("MainActivity", "❌ PushNotificationsPlugin registration failed completely: " + e2.getMessage(), e2);
             }
         }
         
@@ -189,7 +206,21 @@ public class MainActivity extends BridgeActivity {
             "}" +
             "" +
             "// Start registration attempts" +
-            "attemptRegistration();";
+            "attemptRegistration();" +
+            "" +
+            "// Debug: Log all available Capacitor plugins after 5 seconds" +
+            "setTimeout(() => {" +
+            "  if (window.Capacitor && window.Capacitor.Plugins) {" +
+            "    console.log('🔍 DEBUG: All available Capacitor plugins:', Object.keys(window.Capacitor.Plugins));" +
+            "    if (window.Capacitor.Plugins.PushNotifications) {" +
+            "      console.log('✅ DEBUG: PushNotifications plugin is available!');" +
+            "    } else {" +
+            "      console.error('❌ DEBUG: PushNotifications plugin NOT available');" +
+            "    }" +
+            "  } else {" +
+            "    console.error('❌ DEBUG: Capacitor or Capacitor.Plugins not available');" +
+            "  }" +
+            "}, 5000);";
         
         // Execute scripts with immediate plugin setup
         webView.post(() -> {
