@@ -126,9 +126,35 @@ src/
 
 ### Current APK Location
 
-After successful build: `android/app/build/outputs/apk/debug/app-debug_{version}-debug.apk`
-- **Current Version**: `app-debug_1.8-debug.apk`
-- **Versioning**: Auto-incremental (versionCode 9, versionName "1.8")
+After successful build: `android/app/build/outputs/apk/debug/app-debug.apk`
+- **Size**: ~42MB
+- **Build Location**: `android/app/build/outputs/apk/debug/`
+
+### ⚠️ IMPORTANT: macOS APK Distribution Fix
+
+**Issue**: APKs built on macOS have extended attributes that cause "Internal error occurred" when uploading to Google Drive or other cloud services.
+
+**Solution**: Always create a clean APK before distribution:
+```bash
+cd android/app/build/outputs/apk/debug
+cp app-debug.apk app-debug-clean.apk
+xattr -c app-debug-clean.apk
+```
+
+**Verification**:
+```bash
+# Check if APK has problematic attributes
+xattr -l app-debug.apk
+
+# Verify clean APK has no attributes  
+xattr -l app-debug-clean.apk || echo "Clean APK ready for distribution"
+```
+
+**Use `app-debug-clean.apk` for**:
+- Google Drive uploads
+- Email attachments  
+- Any cloud service distribution
+- Sharing with testers
 
 ### Google SSO Integration
 

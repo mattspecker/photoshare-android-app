@@ -302,11 +302,25 @@ export async function scanQRCode() {
       console.log('✅ QR code found:', qrValue);
       return qrValue;
     } else {
-      throw new Error('No QR code found');
+      // User cancelled by pressing X button - this is normal behavior
+      console.log('📷 Scan cancelled by user (X button pressed)');
+      return null; // Return null instead of throwing error for cancellation
     }
 
   } catch (error) {
     console.error('❌ Error scanning QR code:', error);
+    
+    // Check if this is a user cancellation (common error messages from MLKit)
+    if (error.message && (
+      error.message.includes('cancelled') || 
+      error.message.includes('canceled') || 
+      error.message.includes('User cancelled') ||
+      error.message.includes('SCAN_CANCELLED') ||
+      error.message.includes('Operation was cancelled')
+    )) {
+      console.log('📷 QR scan cancelled by user');
+      return null; // Return null for cancellation, don't throw error
+    }
     
     // If it's a permission error, provide actionable guidance with Settings option
     if (error.message.includes('permission') || error.message.includes('denied')) {
@@ -314,6 +328,8 @@ export async function scanQRCode() {
       settingsError.canOpenSettings = true;
       throw settingsError;
     }
+    
+    // For other errors, throw them so the web can handle appropriately
     throw error;
   }
 }
@@ -649,7 +665,7 @@ export async function testQRScanner() {
       success: true,
       pluginAvailable: isAvailable,
       permissions: permissionStatus,
-      message: 'QR Scanner is ready! Use scanQRCode() to start scanning.'
+      message: 'QR Scanner is ready! Use scanQRCode() to start scanning. Returns QR code value or null if cancelled.'
     };
   } catch (error) {
     console.error('❌ QR Scanner test failed:', error);

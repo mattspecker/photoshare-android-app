@@ -616,7 +616,7 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
         // PRIORITY: Use fresh chunked tokens first (now potentially auto-requested)
         if (freshToken != null && (System.currentTimeMillis() - freshTokenTime) < 300000) {
             Log.d(TAG, "✅ Using fresh JWT token from chunked transfer (length: " + freshToken.length() + ", age: " + ((System.currentTimeMillis() - freshTokenTime) / 1000) + "s)");
-            Log.d(TAG, "🔍 Fresh token preview: " + (freshToken.length() > 100 ? freshToken.substring(0, 50) + "..." + freshToken.substring(freshToken.length() - 50) : freshToken));
+            Log.d(TAG, "🔍 Fresh token preview: Token content available");
             jwtToken = freshToken;
         } else if (freshToken != null) {
             Log.w(TAG, "⚠️ Fresh token still expired after auto-request (age: " + ((System.currentTimeMillis() - freshTokenTime) / 1000) + "s)");
@@ -625,7 +625,7 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
             // Fallback to monitoring token if long enough
             if (monitoringToken != null && monitoringToken.length() > 500) {
                 Log.d(TAG, "✅ Using monitoring JWT token as fallback (length: " + monitoringToken.length() + ")");
-                Log.d(TAG, "🔍 Monitoring token preview: " + (monitoringToken.length() > 100 ? monitoringToken.substring(0, 50) + "..." + monitoringToken.substring(monitoringToken.length() - 50) : monitoringToken));
+                Log.d(TAG, "🔍 Monitoring token preview: Token content available");
                 jwtToken = monitoringToken;
             } else {
                 Log.e(TAG, "❌ No valid tokens available - monitoring token too short (" + (monitoringToken != null ? monitoringToken.length() : 0) + " chars)");
@@ -636,7 +636,7 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
             // Last resort: use monitoring token if available and long enough
             if (monitoringToken != null && monitoringToken.length() > 500) {
                 Log.d(TAG, "✅ Using monitoring JWT token as last resort (length: " + monitoringToken.length() + ")");
-                Log.d(TAG, "🔍 Monitoring token preview: " + (monitoringToken.length() > 100 ? monitoringToken.substring(0, 50) + "..." + monitoringToken.substring(monitoringToken.length() - 50) : monitoringToken));
+                Log.d(TAG, "🔍 Monitoring token preview: Token content available");
                 jwtToken = monitoringToken;
             } else {
                 Log.e(TAG, "❌ No valid tokens available after auto-request");
@@ -697,7 +697,7 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
         // DEBUG: Log the token being parsed in the dialog
         Log.d(TAG, "🔍 DIALOG DEBUG: Parsing JWT token for expiration display");
         Log.d(TAG, "🔍 Token length: " + jwtToken.length());
-        Log.d(TAG, "🔍 Token preview: " + tokenPreview);
+        Log.d(TAG, "🔍 Token preview available");
         
         try {
             String[] parts = jwtToken.split("\\.");

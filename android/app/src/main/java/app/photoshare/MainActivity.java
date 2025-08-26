@@ -15,9 +15,7 @@ import android.webkit.JavascriptInterface;
 import android.content.Context;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.Plugin;
-import io.capawesome.capacitorjs.plugins.mlkit.barcodescanning.BarcodeScannerPlugin;
 import app.photoshare.EventPhotoPickerPlugin;
-import com.capacitorjs.plugins.pushnotifications.PushNotificationsPlugin;
 import java.util.ArrayList;
 
 public class MainActivity extends BridgeActivity {
@@ -31,62 +29,21 @@ public class MainActivity extends BridgeActivity {
         
         Log.d("MainActivity", "=== PLUGIN REGISTRATION STARTING ===");
         
-        // Call super.onCreate to initialize Capacitor bridge
+        // CRITICAL: Register custom plugins BEFORE super.onCreate() (Capacitor 7.4.3 requirement)
+        Log.d("MainActivity", "Registering EventPhotoPickerPlugin (custom plugin) BEFORE super.onCreate()...");
+        registerPlugin(EventPhotoPickerPlugin.class);
+        Log.d("MainActivity", "✅ EventPhotoPickerPlugin registered successfully");
+        
+        // Note: NPM plugins (BarcodeScanner, PushNotifications, etc.) are auto-registered by Capacitor
+        // DO NOT manually register them per Capacitor 7.4.3 guidelines
+        Log.d("MainActivity", "NPM plugins (BarcodeScanner, PushNotifications) will be auto-registered by Capacitor");
+        
+        Log.d("MainActivity", "=== CUSTOM PLUGIN REGISTRATION COMPLETE ===");
+        
+        // Call super.onCreate AFTER registering custom plugins
         super.onCreate(savedInstanceState);
         
-        // Register EventPhotoPicker plugin using getBridge() method
-        try {
-            Log.d("MainActivity", "Registering EventPhotoPickerPlugin via getBridge()...");
-            this.getBridge().registerPlugin(EventPhotoPickerPlugin.class);
-            Log.d("MainActivity", "✅ EventPhotoPickerPlugin registered successfully via getBridge()");
-            Log.d("MainActivity", "🔌 EventPhotoPicker loads here - plugin should now be available to JavaScript");
-        } catch (Exception e) {
-            Log.e("MainActivity", "❌ getBridge() registration failed, trying direct registerPlugin()");
-            Log.e("MainActivity", "getBridge() error: " + e.getMessage(), e);
-            
-            // Fallback to direct registration
-            try {
-                Log.d("MainActivity", "Fallback: Registering EventPhotoPickerPlugin directly...");
-                registerPlugin(EventPhotoPickerPlugin.class);
-                Log.d("MainActivity", "✅ EventPhotoPickerPlugin registered successfully (direct)");
-            } catch (Exception e2) {
-                Log.e("MainActivity", "❌ Both registration methods failed: " + e2.getMessage(), e2);
-            }
-        }
-        
-        // Register BarcodeScannerPlugin using getBridge() method
-        try {
-            Log.d("MainActivity", "Registering BarcodeScannerPlugin via getBridge()...");
-            this.getBridge().registerPlugin(BarcodeScannerPlugin.class);
-            Log.d("MainActivity", "✅ BarcodeScannerPlugin registered successfully via getBridge()");
-        } catch (Exception e) {
-            Log.e("MainActivity", "❌ Failed to register BarcodeScannerPlugin via getBridge(): " + e.getMessage(), e);
-            // Fallback to direct registration
-            try {
-                registerPlugin(BarcodeScannerPlugin.class);
-                Log.d("MainActivity", "✅ BarcodeScannerPlugin registered successfully (direct)");
-            } catch (Exception e2) {
-                Log.e("MainActivity", "❌ BarcodeScannerPlugin registration failed completely: " + e2.getMessage(), e2);
-            }
-        }
-        
-        // Register PushNotifications plugin explicitly
-        try {
-            Log.d("MainActivity", "Registering PushNotificationsPlugin via getBridge()...");
-            this.getBridge().registerPlugin(PushNotificationsPlugin.class);
-            Log.d("MainActivity", "✅ PushNotificationsPlugin registered successfully via getBridge()");
-        } catch (Exception e) {
-            Log.e("MainActivity", "❌ Failed to register PushNotificationsPlugin via getBridge(): " + e.getMessage(), e);
-            // Fallback to direct registration
-            try {
-                registerPlugin(PushNotificationsPlugin.class);
-                Log.d("MainActivity", "✅ PushNotificationsPlugin registered successfully (direct)");
-            } catch (Exception e2) {
-                Log.e("MainActivity", "❌ PushNotificationsPlugin registration failed completely: " + e2.getMessage(), e2);
-            }
-        }
-        
-        Log.d("MainActivity", "=== PLUGIN REGISTRATION COMPLETE ===");
+        Log.d("MainActivity", "=== CAPACITOR INITIALIZATION COMPLETE ===");
         
         // Initialize safe area handling
         initializeSafeArea();
