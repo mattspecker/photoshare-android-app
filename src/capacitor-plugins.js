@@ -13,6 +13,36 @@ import { PushNotifications } from '@capacitor/push-notifications';
 // Register custom EventPhotoPicker plugin
 const EventPhotoPicker = registerPlugin('EventPhotoPicker');
 
+// Register custom AppPermissions plugin for onboarding
+const AppPermissions = registerPlugin('AppPermissions');
+
+// Make plugins available globally
+if (window.Capacitor && window.Capacitor.Plugins) {
+    window.Capacitor.Plugins.EventPhotoPicker = EventPhotoPicker;
+    window.Capacitor.Plugins.AppPermissions = AppPermissions;
+}
+
+// Set up proper Capacitor event listeners for AppPermissions
+if (AppPermissions) {
+    // Listen for plugin ready event
+    AppPermissions.addListener('pluginReady', (data) => {
+        console.log('🔌 AppPermissions Plugin Ready Event:', data);
+    });
+    
+    // Listen for first launch check events
+    AppPermissions.addListener('firstLaunchCheck', (data) => {
+        console.log('📱 AppPermissions First Launch Event:', data);
+        console.log(`📱 AppPermissions: firstopen = ${data.isFirstLaunch}`);
+    });
+    
+    // Listen for ping events
+    AppPermissions.addListener('ping', (data) => {
+        console.log('🏓 AppPermissions Ping Event:', data);
+    });
+    
+    console.log('🔌 AppPermissions event listeners registered');
+}
+
 // Initialize Google Auth (call this when app starts)
 export async function initializeGoogleAuth() {
   try {
@@ -917,6 +947,46 @@ if (typeof window !== 'undefined') {
       },
       register: async () => {
         return await PushNotifications.register();
+      }
+    },
+    AppPermissions: {
+      isFirstLaunch: async () => {
+        console.log('📱 AppPermissions JS Bridge: Calling isFirstLaunch()');
+        const result = await AppPermissions.isFirstLaunch();
+        const isFirst = result.isFirstLaunch;
+        console.log(`📱 AppPermissions JS Bridge: firstopen = ${isFirst}`);
+        return isFirst;
+      },
+      requestNotificationPermission: async () => {
+        return await AppPermissions.requestNotificationPermission();
+      },
+      requestCameraPermission: async () => {
+        return await AppPermissions.requestCameraPermission();
+      },
+      requestPhotoPermission: async () => {
+        return await AppPermissions.requestPhotoPermission();
+      },
+      markOnboardingComplete: async () => {
+        return await AppPermissions.markOnboardingComplete();
+      },
+      openAppSettings: async () => {
+        return await AppPermissions.openAppSettings();
+      },
+      isOnboardingComplete: async () => {
+        const result = await AppPermissions.isOnboardingComplete();
+        return result.complete;
+      },
+      ping: async () => {
+        console.log('🏓 AppPermissions JS Bridge: Calling ping() method');
+        const result = await AppPermissions.ping();
+        console.log('🏓 AppPermissions JS Bridge: ping() result:', result);
+        return result;
+      },
+      debugPrefsState: async () => {
+        console.log('📊 AppPermissions JS Bridge: Calling debugPrefsState() method');
+        const result = await AppPermissions.debugPrefsState();
+        console.log('📊 AppPermissions JS Bridge: debugPrefsState() result:', result);
+        return result;
       }
     },
   };

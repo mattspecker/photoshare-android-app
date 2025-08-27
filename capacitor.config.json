@@ -24,6 +24,9 @@
     "EventPhotoPicker": {
       "enabled": true
     },
+    "AppPermissions": {
+      "enabled": true
+    },
     "FirebaseAuthentication": {
       "skipNativeAuth": false,
       "providers": ["google.com"]

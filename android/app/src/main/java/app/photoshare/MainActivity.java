@@ -16,6 +16,7 @@ import android.content.Context;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.Plugin;
 import app.photoshare.EventPhotoPickerPlugin;
+import app.photoshare.AppPermissionsPlugin;
 import java.util.ArrayList;
 
 public class MainActivity extends BridgeActivity {
@@ -30,9 +31,15 @@ public class MainActivity extends BridgeActivity {
         Log.d("MainActivity", "=== PLUGIN REGISTRATION STARTING ===");
         
         // CRITICAL: Register custom plugins BEFORE super.onCreate() (Capacitor 7.4.3 requirement)
-        Log.d("MainActivity", "Registering EventPhotoPickerPlugin (custom plugin) BEFORE super.onCreate()...");
+        Log.d("MainActivity", "Registering custom plugins BEFORE super.onCreate()...");
+        
+        // Register EventPhotoPicker plugin
         registerPlugin(EventPhotoPickerPlugin.class);
         Log.d("MainActivity", "✅ EventPhotoPickerPlugin registered successfully");
+        
+        // Register AppPermissions plugin for onboarding
+        registerPlugin(AppPermissionsPlugin.class);
+        Log.d("MainActivity", "✅ AppPermissionsPlugin registered successfully");
         
         // Note: NPM plugins (BarcodeScanner, PushNotifications, etc.) are auto-registered by Capacitor
         // DO NOT manually register them per Capacitor 7.4.3 guidelines
