@@ -35,11 +35,12 @@ import com.getcapacitor.PermissionState;
             alias = "camera"
         ),
         @Permission(
-            strings = { 
-                Manifest.permission.READ_EXTERNAL_STORAGE,
-                Manifest.permission.READ_MEDIA_IMAGES 
-            },
-            alias = "photos"
+            strings = { Manifest.permission.READ_EXTERNAL_STORAGE },
+            alias = "photos_legacy"
+        ),
+        @Permission(
+            strings = { Manifest.permission.READ_MEDIA_IMAGES },
+            alias = "photos_modern"
         )
     }
 )
@@ -57,13 +58,69 @@ public class AppPermissionsPlugin extends Plugin {
         super.load();
         Log.d(TAG, "🚀 AppPermissionsPlugin loaded successfully");
         
+        // Inject JavaScript to create CapacitorApp bridge that web app expects
+        String script = 
+            "console.log('🔌 NATIVE: AppPermissions plugin loaded, creating CapacitorApp bridge');" +
+            "if (!window.Capacitor) window.Capacitor = {};" +
+            "if (!window.Capacitor.Plugins) window.Capacitor.Plugins = {};" +
+            "" +
+            "// Create CapacitorApp bridge that routes to AppPermissions plugin" +
+            "window.CapacitorApp = window.CapacitorApp || {};" +
+            "" +
+            "// Route camera permission through AppPermissions plugin" +
+            "window.CapacitorApp.requestCameraPermission = async function() {" +
+            "  console.log('🔥 CapacitorApp.requestCameraPermission called from web');" +
+            "  if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AppPermissions) {" +
+            "    return await window.Capacitor.Plugins.AppPermissions.requestCameraPermission();" +
+            "  } else {" +
+            "    console.error('AppPermissions plugin not available');" +
+            "    return { granted: false, error: 'AppPermissions plugin not available' };" +
+            "  }" +
+            "};" +
+            "" +
+            "// Route photo permission through AppPermissions plugin" +
+            "window.CapacitorApp.requestPhotoPermission = async function() {" +
+            "  console.log('🔥 CapacitorApp.requestPhotoPermission called from web');" +
+            "  if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AppPermissions) {" +
+            "    return await window.Capacitor.Plugins.AppPermissions.requestPhotoPermission();" +
+            "  } else {" +
+            "    console.error('AppPermissions plugin not available');" +
+            "    return { granted: false, error: 'AppPermissions plugin not available' };" +
+            "  }" +
+            "};" +
+            "" +
+            "// Route notification permission through AppPermissions plugin" +
+            "window.CapacitorApp.requestNotificationPermission = async function() {" +
+            "  console.log('🔥 CapacitorApp.requestNotificationPermission called from web');" +
+            "  if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AppPermissions) {" +
+            "    return await window.Capacitor.Plugins.AppPermissions.requestNotificationPermission();" +
+            "  } else {" +
+            "    console.error('AppPermissions plugin not available');" +
+            "    return { granted: false, error: 'AppPermissions plugin not available' };" +
+            "  }" +
+            "};" +
+            "" +
+            "console.log('🔌 NATIVE: CapacitorApp bridge created:', !!window.CapacitorApp);" +
+            "console.log('🔌 NATIVE: CapacitorApp.requestCameraPermission:', typeof window.CapacitorApp.requestCameraPermission);" +
+            "console.log('🔌 NATIVE: CapacitorApp.requestPhotoPermission:', typeof window.CapacitorApp.requestPhotoPermission);" +
+            "" +
+            "// Also create AppPermissionPlugin alias for backward compatibility" +
+            "if (window.Capacitor.Plugins.AppPermissions && !window.Capacitor.Plugins.AppPermissionPlugin) {" +
+            "  window.Capacitor.Plugins.AppPermissionPlugin = window.Capacitor.Plugins.AppPermissions;" +
+            "  console.log('🔌 NATIVE: AppPermissionPlugin alias created');" +
+            "}";
+        
+        getBridge().getWebView().post(() -> {
+            getBridge().getWebView().evaluateJavascript(script, null);
+        });
+        
         // Notify JS that plugin is ready using proper Capacitor bridge
         JSObject data = new JSObject();
         data.put("status", "ready");
         data.put("message", "AppPermissions plugin loaded successfully");
         notifyListeners("pluginReady", data);
         
-        Log.d(TAG, "🚀 Plugin ready event sent via notifyListeners");
+        Log.d(TAG, "🚀 Plugin ready event sent via notifyListeners and CapacitorApp bridge injected");
     }
     
     /**
@@ -211,7 +268,25 @@ public class AppPermissionsPlugin extends Plugin {
      */
     @PluginMethod
     public void requestPhotoPermission(PluginCall call) {
-        Log.d(TAG, "Requesting photo permission");
+        Log.d(TAG, "🔥 requestPhotoPermission called");
+        requestPhotosPermission(call);
+    }
+    
+    /**
+     * Request photo/gallery permission (alternative name)
+     */
+    @PluginMethod  
+    public void requestPhotosPermission(PluginCall call) {
+        Log.d(TAG, "🔥 requestPhotosPermission called");
+        requestPhotoLibraryPermission(call);
+    }
+    
+    /**
+     * Request photo/gallery permission (iOS compatible name)
+     */
+    @PluginMethod
+    public void requestPhotoLibraryPermission(PluginCall call) {
+        Log.d(TAG, "🔥 requestPhotoLibraryPermission called - implementing actual logic");
         currentPermissionCall = call;
         
         String permission;
@@ -246,8 +321,10 @@ public class AppPermissionsPlugin extends Plugin {
             return;
         }
         
-        // Request the permission
-        requestPermissionForAlias("photos", call, "photoPermissionCallback");
+        // Request the permission using the appropriate alias for the Android version
+        String alias = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ? "photos_modern" : "photos_legacy";
+        Log.d(TAG, "Requesting photo permission using alias: " + alias + " for permission: " + permission);
+        requestPermissionForAlias(alias, call, "photoPermissionCallback");
     }
     
     /**
@@ -420,8 +497,10 @@ public class AppPermissionsPlugin extends Plugin {
     private void photoPermissionCallback(PluginCall call) {
         if (currentPermissionCall == null) return;
         
-        boolean granted = getPermissionState("photos") == PermissionState.GRANTED;
-        Log.d(TAG, "Photo permission callback: granted = " + granted);
+        // Check the appropriate permission alias based on Android version
+        String alias = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ? "photos_modern" : "photos_legacy";
+        boolean granted = getPermissionState(alias) == PermissionState.GRANTED;
+        Log.d(TAG, "Photo permission callback: granted = " + granted + " for alias: " + alias);
         
         JSObject result = new JSObject();
         result.put("granted", granted);

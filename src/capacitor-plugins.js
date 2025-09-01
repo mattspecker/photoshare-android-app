@@ -2,6 +2,7 @@
 // This file demonstrates how to use the installed Capacitor plugins
 
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
+import { CameraPreview } from '@capacitor-community/camera-preview';
 import { BarcodeScanner } from '@capacitor-mlkit/barcode-scanning';
 import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
 import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
@@ -13,14 +14,162 @@ import { PushNotifications } from '@capacitor/push-notifications';
 // Register custom EventPhotoPicker plugin
 const EventPhotoPicker = registerPlugin('EventPhotoPicker');
 
-// Register custom AppPermissions plugin for onboarding
-const AppPermissions = registerPlugin('AppPermissions');
+// MODERN CAPACITOR 7 PLUGIN REGISTRATION FOR AppPermissions
+console.log('🚀 Registering AppPermissions using modern Capacitor 7 approach...');
 
-// Make plugins available globally
+// Register AppPermissions plugin with proper error handling
+let AppPermissions;
+
+try {
+  AppPermissions = registerPlugin('AppPermissions', {
+    web: () => {
+      console.log('🌐 Loading web implementation for AppPermissions');
+      return {
+        requestCameraPermission: async () => ({ granted: true }),
+        requestPhotoPermission: async () => ({ granted: true }),
+        requestNotificationPermission: async () => ({ granted: true }),
+        ping: async () => ({ success: true, message: 'Web implementation' })
+      };
+    }
+  });
+  console.log('✅ AppPermissions plugin registered successfully');
+} catch (error) {
+  console.error('❌ Failed to register AppPermissions plugin:', error);
+}
+
+// Test plugin availability with delay to ensure registration is complete
+console.log('🔌 Testing AppPermissions plugin availability...');
+
+// Use setTimeout to ensure the plugin registration has completed
+setTimeout(() => {
+  if (AppPermissions && typeof AppPermissions.ping === 'function') {
+    console.log('🔌 AppPermissions plugin is defined, calling ping...');
+    AppPermissions.ping().then(result => {
+      console.log('✅ AppPermissions plugin ping successful:', result);
+      setupCapacitorAppBridge(AppPermissions);
+    }).catch(error => {
+      console.error('❌ AppPermissions plugin ping failed:', error);
+      setupCapacitorAppBridge(AppPermissions);
+    });
+  } else {
+    console.error('❌ AppPermissions plugin is not available or ping method missing');
+    console.log('🔍 AppPermissions type:', typeof AppPermissions);
+    console.log('🔍 AppPermissions methods:', AppPermissions ? Object.keys(AppPermissions) : 'none');
+    setupCapacitorAppBridge(AppPermissions);
+  }
+}, 100); // Small delay to ensure registration completes
+
+// Function to create CapacitorApp bridge using properly registered plugin
+function setupCapacitorAppBridge(appPermissionsPlugin) {
+  console.log('🔥 Setting up CapacitorApp bridge with modern plugin registration...');
+  console.log('🔍 Received plugin parameter:', typeof appPermissionsPlugin);
+  
+  // Create CapacitorApp bridge that web app expects
+  window.CapacitorApp = {
+    async requestCameraPermission() {
+      console.log('🔥 CapacitorApp.requestCameraPermission called via modern plugin');
+      try {
+        if (appPermissionsPlugin && appPermissionsPlugin.requestCameraPermission) {
+          return await appPermissionsPlugin.requestCameraPermission();
+        } else {
+          console.error('🔥 AppPermissions plugin not available for camera permission');
+          return { granted: false, error: 'AppPermissions plugin not available' };
+        }
+      } catch (error) {
+        console.error('🔥 Error calling AppPermissions.requestCameraPermission:', error);
+        return { granted: false, error: error.message || 'Plugin call failed' };
+      }
+    },
+    
+    async requestPhotoPermission() {
+      console.log('🔥 CapacitorApp.requestPhotoPermission called via modern plugin');
+      try {
+        if (appPermissionsPlugin && appPermissionsPlugin.requestPhotoPermission) {
+          return await appPermissionsPlugin.requestPhotoPermission();
+        } else {
+          console.error('🔥 AppPermissions plugin not available for photo permission');
+          return { granted: false, error: 'AppPermissions plugin not available' };
+        }
+      } catch (error) {
+        console.error('🔥 Error calling AppPermissions.requestPhotoPermission:', error);
+        return { granted: false, error: error.message || 'Plugin call failed' };
+      }
+    },
+    
+    async requestNotificationPermission() {
+      console.log('🔥 CapacitorApp.requestNotificationPermission called via modern plugin');
+      try {
+        if (appPermissionsPlugin && appPermissionsPlugin.requestNotificationPermission) {
+          return await appPermissionsPlugin.requestNotificationPermission();
+        } else {
+          console.error('🔥 AppPermissions plugin not available for notification permission');
+          return { granted: false, error: 'AppPermissions plugin not available' };
+        }
+      } catch (error) {
+        console.error('🔥 Error calling AppPermissions.requestNotificationPermission:', error);
+        return { granted: false, error: error.message || 'Plugin call failed' };
+      }
+    }
+  };
+  
+  // Set ready flags
+  window._capacitorAppReady = true;
+  
+  // Fire ready event
+  window.dispatchEvent(new CustomEvent('capacitor-app-ready', {
+    detail: {
+      timestamp: Date.now(),
+      source: 'modern-capacitor-7-registration',
+      available: true,
+      functions: ['requestCameraPermission', 'requestPhotoPermission', 'requestNotificationPermission']
+    }
+  }));
+  
+  console.log('✅ CapacitorApp bridge created using modern Capacitor 7 plugin registration');
+  console.log('🔥 Functions available:', Object.keys(window.CapacitorApp));
+  console.log('🔥 AppPermissions plugin type:', typeof AppPermissions);
+  console.log('🔥 AppPermissions methods:', AppPermissions ? Object.getOwnPropertyNames(AppPermissions) : 'none');
+}
+
+// Legacy compatibility - also register on window.Capacitor.Plugins if needed
 if (window.Capacitor && window.Capacitor.Plugins) {
     window.Capacitor.Plugins.EventPhotoPicker = EventPhotoPicker;
     window.Capacitor.Plugins.AppPermissions = AppPermissions;
+    window.Capacitor.Plugins.AppPermissionPlugin = AppPermissions;
 }
+
+// Make AppPermissions available globally for debugging and compatibility
+window.AppPermissions = AppPermissions;
+
+// Also make it available globally for console debugging
+if (typeof window !== 'undefined') {
+  setTimeout(() => {
+    window.AppPermissions = AppPermissions;
+    console.log('🌍 Global window.AppPermissions set for debugging:', typeof window.AppPermissions);
+  }, 200);
+}
+
+// CapacitorApp bridge is created by setupCapacitorAppBridge() function above
+
+// Add method aliases to ensure web app can find the right method
+if (AppPermissions) {
+  // Add common method aliases
+  if (!AppPermissions.requestPhotosPermission && AppPermissions.requestPhotoPermission) {
+    AppPermissions.requestPhotosPermission = AppPermissions.requestPhotoPermission;
+  }
+  if (!AppPermissions.requestPhotoLibraryPermission && AppPermissions.requestPhotoPermission) {
+    AppPermissions.requestPhotoLibraryPermission = AppPermissions.requestPhotoPermission;
+  }
+}
+
+// Log availability for debugging  
+console.log('🔌 AppPermissions Plugin Registered:', !!AppPermissions);
+console.log('🔌 AppPermissions Available at window.AppPermissions:', !!window.AppPermissions);
+console.log('🔌 AppPermissions Available at window.Capacitor.Plugins.AppPermissions:', !!(window.Capacitor?.Plugins?.AppPermissions));
+console.log('🔌 AppPermissionPlugin Available at window.Capacitor.Plugins.AppPermissionPlugin:', !!(window.Capacitor?.Plugins?.AppPermissionPlugin));
+console.log('🔌 AppPermissions Methods Available:', AppPermissions ? Object.keys(AppPermissions).filter(k => k.startsWith('request')) : 'none');
+console.log('🔥 CapacitorApp Bridge Created:', !!window.CapacitorApp);
+console.log('🔥 CapacitorApp Methods Available:', window.CapacitorApp ? Object.keys(window.CapacitorApp) : 'none');
 
 // Set up proper Capacitor event listeners for AppPermissions
 if (AppPermissions) {
@@ -60,24 +209,24 @@ export async function initializeGoogleAuth() {
 // Camera Plugin Functions with enhanced permission handling
 export async function takePicture() {
   try {
-    // Check current permissions
-    let permissions = await Camera.checkPermissions();
+    // Check and request permissions separately using AppPermissions
+    console.log('📸 Requesting camera and photo permissions with AppPermissions...');
     
-    if (permissions.camera !== 'granted' || permissions.photos !== 'granted') {
-      console.log('Camera permissions not granted, requesting...');
+    // Request camera permission
+    const cameraResult = await AppPermissions.requestCameraPermission();
+    console.log('📸 Camera permission result:', cameraResult);
+    
+    // Request photo permission  
+    const photoResult = await AppPermissions.requestPhotoPermission();
+    console.log('📸 Photo permission result:', photoResult);
+    
+    // Check if both permissions were granted
+    if (!cameraResult.granted || !photoResult.granted) {
+      const errors = [];
+      if (!cameraResult.granted) errors.push(cameraResult.error || 'Camera access denied');
+      if (!photoResult.granted) errors.push(photoResult.error || 'Photos access denied');
       
-      // Force request permissions - this should show dialog even if previously denied
-      const requestResult = await Camera.requestPermissions({ permissions: ['camera', 'photos'] });
-      
-      // If still denied, give user specific guidance
-      if (requestResult.camera !== 'granted' || requestResult.photos !== 'granted') {
-        // Check if we can request again or if user selected "Never ask again"
-        const finalCheck = await Camera.checkPermissions();
-        
-        if (finalCheck.camera === 'denied' || finalCheck.photos === 'denied') {
-          throw new Error('Camera access required. Please go to Settings > Apps > PhotoShare > Permissions and enable Camera and Photos access.');
-        }
-      }
+      throw new Error('Camera access required. Please go to Settings > Apps > PhotoShare > Permissions and enable Camera and Photos access. Details: ' + errors.join(', '));
     }
     
     const image = await Camera.getPhoto({
@@ -85,6 +234,8 @@ export async function takePicture() {
       allowEditing: false,
       resultType: CameraResultType.Uri,
       source: CameraSource.Camera,
+      saveToGallery: true,
+      correctOrientation: true
     });
     return image;
   } catch (error) {
@@ -102,23 +253,16 @@ export async function takePicture() {
 
 export async function selectFromGallery() {
   try {
-    // Check current permissions
-    let permissions = await Camera.checkPermissions();
+    // Use AppPermissions for photo permission check and request
+    console.log('📸 Checking photo permissions with AppPermissions...');
     
-    if (permissions.photos !== 'granted') {
-      console.log('Photos permission not granted, requesting...');
-      
-      // Force request permissions
-      const requestResult = await Camera.requestPermissions({ permissions: ['photos'] });
-      
-      if (requestResult.photos !== 'granted') {
-        // Check final permission state
-        const finalCheck = await Camera.checkPermissions();
-        
-        if (finalCheck.photos === 'denied') {
-          throw new Error('Photos access required. Please go to Settings > Apps > PhotoShare > Permissions and enable Photos access.');
-        }
-      }
+    // Request photo permission using AppPermissions plugin
+    const photoResult = await AppPermissions.requestPhotoPermission();
+    console.log('📸 Photo permission result:', photoResult);
+    
+    if (!photoResult.granted) {
+      const errorMessage = photoResult.error || 'Photos access required. Please go to Settings > Apps > PhotoShare > Permissions and enable Photos access.';
+      throw new Error(errorMessage);
     }
     
     const image = await Camera.getPhoto({
@@ -126,6 +270,8 @@ export async function selectFromGallery() {
       allowEditing: false,
       resultType: CameraResultType.Uri,
       source: CameraSource.Photos,
+      saveToGallery: false,
+      correctOrientation: true
     });
     return image;
   } catch (error) {
@@ -234,8 +380,22 @@ export async function checkCameraPermissions() {
 
 export async function requestCameraPermissions() {
   try {
-    const permissions = await Camera.requestPermissions({ permissions: ['camera', 'photos'] });
-    return permissions;
+    console.log('📸 Requesting camera and photo permissions with AppPermissions...');
+    
+    // Request both permissions separately using AppPermissions
+    const cameraResult = await AppPermissions.requestCameraPermission();
+    const photoResult = await AppPermissions.requestPhotoPermission();
+    
+    console.log('📸 Camera permission result:', cameraResult);
+    console.log('📸 Photo permission result:', photoResult);
+    
+    // Return in Camera plugin format for compatibility
+    return {
+      camera: cameraResult.granted ? 'granted' : 'denied',
+      photos: photoResult.granted ? 'granted' : 'denied',
+      readExternalStorage: photoResult.granted ? 'granted' : 'denied',
+      saveGallery: 'denied' // We don't save to gallery
+    };
   } catch (error) {
     console.error('Error requesting camera permissions:', error);
     throw error;
@@ -245,23 +405,29 @@ export async function requestCameraPermissions() {
 // Enhanced permission request with Settings guidance
 export async function requestCameraPermissionsWithGuidance() {
   try {
-    const initialCheck = await Camera.checkPermissions();
+    console.log('📸 Requesting camera and photo permissions with guidance using AppPermissions...');
     
-    if (initialCheck.camera === 'granted' && initialCheck.photos === 'granted') {
-      return { success: true, permissions: initialCheck };
+    // Request both permissions separately using AppPermissions
+    const cameraResult = await AppPermissions.requestCameraPermission();
+    const photoResult = await AppPermissions.requestPhotoPermission();
+    
+    console.log('📸 Camera permission result:', cameraResult);
+    console.log('📸 Photo permission result:', photoResult);
+    
+    // Create compatibility format
+    const permissions = {
+      camera: cameraResult.granted ? 'granted' : 'denied',
+      photos: photoResult.granted ? 'granted' : 'denied',
+      readExternalStorage: photoResult.granted ? 'granted' : 'denied',
+      saveGallery: 'denied'
+    };
+    
+    if (cameraResult.granted && photoResult.granted) {
+      return { success: true, permissions };
     }
     
-    // Request permissions
-    const requestResult = await Camera.requestPermissions({ permissions: ['camera', 'photos'] });
-    
-    if (requestResult.camera === 'granted' && requestResult.photos === 'granted') {
-      return { success: true, permissions: requestResult };
-    }
-    
-    // If still denied, check if we need to direct to Settings
-    const finalCheck = await Camera.checkPermissions();
-    
-    if (finalCheck.camera === 'denied' || finalCheck.photos === 'denied') {
+    // If permissions denied, provide guidance
+    if (!cameraResult.granted || !photoResult.granted) {
       return {
         success: false,
         needsSettings: true,
@@ -991,3 +1157,120 @@ if (typeof window !== 'undefined') {
     },
   };
 }
+
+// ============================================================================
+// 📹 CAMERA PREVIEW FUNCTIONS
+// Test @capacitor-community/camera-preview functionality
+// ============================================================================
+
+export async function startCameraPreview() {
+  try {
+    console.log('📹 Starting camera preview...');
+    
+    // First check if the plugin is available
+    if (!CameraPreview) {
+      throw new Error('CameraPreview plugin not available');
+    }
+    
+    console.log('📹 CameraPreview plugin available, starting preview...');
+    
+    const result = await CameraPreview.start({
+      position: 'rear',
+      width: window.innerWidth,
+      height: window.innerHeight,
+      x: 0,
+      y: 0,
+      paddingBottom: 100,
+      rotateWhenOrientationChanged: true,
+      storeToFile: false,
+      disableExifHeaderStripping: false
+    });
+    
+    console.log('✅ Camera preview started:', result);
+    return result;
+  } catch (error) {
+    console.error('❌ Error starting camera preview:', error);
+    throw error;
+  }
+}
+
+export async function stopCameraPreview() {
+  try {
+    console.log('📹 Stopping camera preview...');
+    
+    const result = await CameraPreview.stop();
+    
+    console.log('✅ Camera preview stopped:', result);
+    return result;
+  } catch (error) {
+    console.error('❌ Error stopping camera preview:', error);
+    throw error;
+  }
+}
+
+export async function captureFromPreview() {
+  try {
+    console.log('📹 Capturing photo from preview...');
+    
+    const result = await CameraPreview.capture({
+      quality: 90,
+      width: 1920,
+      height: 1080
+    });
+    
+    console.log('✅ Photo captured from preview:', result);
+    return result;
+  } catch (error) {
+    console.error('❌ Error capturing from preview:', error);
+    throw error;
+  }
+}
+
+export async function testCameraPreview() {
+  try {
+    console.log('🧪 Testing camera preview functionality...');
+    
+    // Test starting camera preview
+    await startCameraPreview();
+    
+    // Wait 3 seconds to see the preview
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    // Test capturing a photo
+    const captureResult = await captureFromPreview();
+    
+    // Wait 1 second then stop
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    await stopCameraPreview();
+    
+    console.log('✅ Camera preview test completed successfully');
+    return {
+      success: true,
+      capturedPhoto: captureResult
+    };
+  } catch (error) {
+    console.error('❌ Camera preview test failed:', error);
+    
+    // Try to stop preview if it's running
+    try {
+      await stopCameraPreview();
+    } catch (stopError) {
+      console.error('Also failed to stop preview:', stopError);
+    }
+    
+    throw error;
+  }
+}
+
+// Make camera preview functions globally accessible for testing
+window.testCameraPreview = testCameraPreview;
+window.startCameraPreview = startCameraPreview;
+window.stopCameraPreview = stopCameraPreview;
+window.captureFromPreview = captureFromPreview;
+
+console.log('📹 Camera Preview test functions available:');
+console.log('  • testCameraPreview() - Run full test');
+console.log('  • startCameraPreview() - Start preview');
+console.log('  • stopCameraPreview() - Stop preview');
+console.log('  • captureFromPreview() - Capture photo');

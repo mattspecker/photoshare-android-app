@@ -681,89 +681,52 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
     }
     
     private void startUploadProcess(List<PhotoItem> selectedPhotos, String jwtToken) {
-        Log.d(TAG, "🚀 Starting upload process for " + selectedPhotos.size() + " photos");
+        Log.d(TAG, "🚀 Starting streamlined upload process for " + selectedPhotos.size() + " photos");
         
+        // Validate JWT token before proceeding with upload
+        if (jwtToken == null || jwtToken.trim().isEmpty()) {
+            Log.e(TAG, "❌ JWT token validation failed - token is null or empty");
+            showUserFriendlyUploadError("Unable to upload photos. Please try again.");
+            return;
+        }
+        
+        // Basic JWT structure validation (should have 3 parts separated by dots)
+        String[] jwtParts = jwtToken.split("\\.");
+        if (jwtParts.length != 3) {
+            Log.e(TAG, "❌ JWT token validation failed - invalid structure (expected 3 parts, got " + jwtParts.length + ")");
+            showUserFriendlyUploadError("Unable to upload photos. Please try again.");
+            return;
+        }
+        
+        Log.d(TAG, "✅ JWT token validation passed - proceeding with upload");
+        
+        // Initialize upload tracking
         totalUploadCount = selectedPhotos.size();
         uploadedCount = 0;
         
-        // Show JWT token dialog for debugging
-        String tokenPreview = jwtToken.length() > 40 ? 
-            jwtToken.substring(0, 20) + "..." + jwtToken.substring(jwtToken.length() - 20) : 
-            jwtToken;
-            
-        // Extract expiration time from JWT for display
-        String expirationInfo = "";
-        
-        // DEBUG: Log the token being parsed in the dialog
-        Log.d(TAG, "🔍 DIALOG DEBUG: Parsing JWT token for expiration display");
-        Log.d(TAG, "🔍 Token length: " + jwtToken.length());
-        Log.d(TAG, "🔍 Token preview available");
-        
-        try {
-            String[] parts = jwtToken.split("\\.");
-            if (parts.length == 3) {
-                String payload = new String(android.util.Base64.decode(parts[1], android.util.Base64.URL_SAFE | android.util.Base64.NO_PADDING));
-                if (payload.contains("\"exp\":")) {
-                    int expStart = payload.indexOf("\"exp\":") + 6;
-                    int expEnd = payload.indexOf(",", expStart);
-                    if (expEnd == -1) expEnd = payload.indexOf("}", expStart);
-                    String expStr = payload.substring(expStart, expEnd).trim();
-                    long exp = Long.parseLong(expStr);
-                    long now = System.currentTimeMillis() / 1000;
-                    
-                    // Convert to UTC ISO 8601 format
-                    java.text.SimpleDateFormat isoFormat = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
-                    isoFormat.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
-                    
-                    String currentTimeISO = isoFormat.format(new java.util.Date(now * 1000));
-                    String expirationTimeISO = isoFormat.format(new java.util.Date(exp * 1000));
-                    
-                    if (exp < now) {
-                        long expiredSeconds = now - exp;
-                        expirationInfo = "\n⏰ Token Status: EXPIRED ❌\n" +
-                                       "Current Time: " + currentTimeISO + "\n" +
-                                       "Expired At: " + expirationTimeISO + "\n" +
-                                       "Expired: " + expiredSeconds + " seconds ago (" + (expiredSeconds / 60) + " min)\n";
-                    } else {
-                        long validSeconds = exp - now;
-                        expirationInfo = "\n⏰ Token Status: VALID ✅\n" +
-                                       "Current Time: " + currentTimeISO + "\n" +
-                                       "Expires At: " + expirationTimeISO + "\n" +
-                                       "Valid for: " + validSeconds + " seconds (" + (validSeconds / 60) + " min)\n";
+        // Start upload immediately - no debug dialog
+        Log.d(TAG, "⚡ Starting upload immediately (streamlined flow)");
+        uploadNextPhoto(selectedPhotos, 0, jwtToken);
+    }
+    
+    /**
+     * Show user-friendly error dialog for upload failures
+     */
+    private void showUserFriendlyUploadError(String message) {
+        runOnUiThread(() -> {
+            new AlertDialog.Builder(this)
+                .setTitle("Upload Error")
+                .setMessage(message)
+                .setPositiveButton("OK", (dialog, which) -> {
+                    dialog.dismiss();
+                    // Hide upload progress dialog if showing
+                    if (uploadProgressDialog != null && uploadProgressDialog.isShowing()) {
+                        uploadProgressDialog.dismiss();
                     }
-                }
-            }
-        } catch (Exception e) {
-            expirationInfo = "\n⚠️ Could not parse token expiration\n";
-        }
-            
-        String dialogMessage = "🔍 EventPhotoPicker JWT Token Debug:\n\n" +
-                              "Token Length: " + jwtToken.length() + "\n" +
-                              "Token Preview: " + tokenPreview + 
-                              expirationInfo + "\n" +
-                              "Upload will start in 5 seconds...";
-        
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("🔐 JWT Token Debug")
-               .setMessage(dialogMessage)
-               .setPositiveButton("Start Upload Now", (dialog, which) -> {
-                   Log.d(TAG, "⚡ Starting upload immediately (user clicked)...");
-                   uploadNextPhoto(selectedPhotos, 0, jwtToken);
-               })
-               .setNegativeButton("Wait 5 sec", null)
-               .setCancelable(false);
-        
-        AlertDialog dialog = builder.create();
-        dialog.show();
-        
-        // Add 5 second delay so user can see JWT debug info in dialog
-        new android.os.Handler().postDelayed(() -> {
-            if (dialog.isShowing()) {
-                dialog.dismiss();
-                Log.d(TAG, "⏰ Starting upload after debug display delay...");
-                uploadNextPhoto(selectedPhotos, 0, jwtToken);
-            }
-        }, 5000); // 5 second delay
+                })
+                .setCancelable(false)
+                .show();
+        });
     }
     
     private void startUploadProcessOld(List<PhotoItem> selectedPhotos) {
@@ -1328,11 +1291,11 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
     }
     
     /**
-     * Request fresh chunked JWT token via Capacitor WebView bridge
-     * This calls window.testChunkedJwtTransfer() automatically
+     * Request fresh chunked JWT token via Capacitor WebView bridge (SILENT MODE)
+     * This calls window.getSilentJwtTokenForAndroid() - no modal dialog
      */
     private void requestFreshChunkedTokenViaCapacitor() {
-        Log.d(TAG, "🔄 AUTO-REQUESTING fresh chunked JWT token via Capacitor...");
+        Log.d(TAG, "🔇 SILENTLY requesting fresh chunked JWT token via Capacitor...");
         
         runOnUiThread(() -> {
             try {
@@ -1341,23 +1304,23 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
                 if (EventPhotoPickerPlugin.getLastBridge() != null) {
                     String javascript = 
                         "javascript:(async function() {" +
-                        "  console.log('🔄 AUTO: Starting automatic chunked JWT request...');" +
-                        "  if (window.testChunkedJwtTransfer) {" +
+                        "  console.log('🔇 AUTO: Starting silent JWT pre-loading...');" +
+                        "  if (window.getSilentJwtTokenForAndroid) {" +
                         "    try {" +
-                        "      console.log('🔄 AUTO: Calling testChunkedJwtTransfer()...');" +
-                        "      const result = await window.testChunkedJwtTransfer();" +
+                        "      console.log('🔇 AUTO: Calling getSilentJwtTokenForAndroid()...');" +
+                        "      const result = await window.getSilentJwtTokenForAndroid();" +
                         "      if (result) {" +
-                        "        console.log('🔄 AUTO: ✅ testChunkedJwtTransfer completed successfully!');" +
+                        "        console.log('🔇 AUTO: ✅ Silent JWT pre-loading completed successfully!');" +
                         "      } else {" +
-                        "        console.log('🔄 AUTO: ⚠️ testChunkedJwtTransfer returned no result');" +
+                        "        console.log('🔇 AUTO: ⚠️ Silent JWT pre-loading returned no result');" +
                         "      }" +
                         "    } catch (error) {" +
-                        "      console.log('🔄 AUTO: ❌ Error in testChunkedJwtTransfer: ' + error.message);" +
+                        "      console.log('🔇 AUTO: ❌ Error in silent JWT pre-loading: ' + error.message);" +
                         "    }" +
                         "  } else {" +
-                        "    console.log('🔄 AUTO: ❌ window.testChunkedJwtTransfer function not available');" +
+                        "    console.log('🔇 AUTO: ❌ window.getSilentJwtTokenForAndroid function not available');" +
                         "  }" +
-                        "  return 'auto-request-completed';" +
+                        "  return 'silent-preload-completed';" +
                         "})();";
                     
                     EventPhotoPickerPlugin.getLastBridge().getWebView().evaluateJavascript(javascript, result -> {

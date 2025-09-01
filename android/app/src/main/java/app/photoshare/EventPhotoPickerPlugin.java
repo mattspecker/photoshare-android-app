@@ -568,21 +568,8 @@ public class EventPhotoPickerPlugin extends Plugin {
                         fullToken.substring(0, 20) + "..." + fullToken.substring(fullToken.length() - 20) : 
                         fullToken;
                     Log.d("EventPhotoPicker", "🔍 JWT Preview: " + preview);
+                    Log.d("EventPhotoPicker", "🔇 JWT token assembled silently - no dialog shown (seamless flow)");
                     
-                    // Show success dialog
-                    getActivity().runOnUiThread(() -> {
-                        String tokenInfo = "✅ JWT TOKEN ASSEMBLED SUCCESSFULLY!\n\n" +
-                                          "Length: " + fullToken.length() + " characters\n" +
-                                          "Parts: " + parts.length + " (valid JWT)\n" +
-                                          "Preview: " + preview + "\n\n" +
-                                          "Token ready for upload!";
-                                          
-                        new AlertDialog.Builder(getActivity())
-                            .setTitle("🔐 JWT Token Ready")
-                            .setMessage(tokenInfo)
-                            .setPositiveButton("OK", null)
-                            .show();
-                    });
                 } else {
                     Log.e("EventPhotoPicker", "❌ Assembled token has invalid JWT structure: " + parts.length + " parts");
                 }

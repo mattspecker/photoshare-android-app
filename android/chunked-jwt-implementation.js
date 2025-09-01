@@ -142,6 +142,30 @@ async function getPhotoShareJwtTokenForAndroidChunked() {
 }
 
 /**
+ * Silent JWT acquisition for seamless upload flow - no modal
+ */
+async function getSilentJwtTokenForAndroid() {
+    try {
+        console.log('🔇 Getting JWT token silently (no modal)...');
+        
+        const result = await getPhotoShareJwtTokenForAndroidChunked();
+        
+        if (result) {
+            console.log('🔇 ✅ Silent JWT acquisition completed successfully');
+            console.log(`🔇 Token length: ${result.length} chars, Transfer method: ${result.length > 100 ? 'Chunked' : 'Direct'}`);
+        } else {
+            console.log('🔇 ❌ Silent JWT acquisition failed - No JWT token obtained');
+        }
+        
+        return result;
+        
+    } catch (error) {
+        console.error('🔇 ❌ Silent JWT acquisition error:', error);
+        return null;
+    }
+}
+
+/**
  * Test function to verify chunked JWT transfer is working
  */
 async function testChunkedJwtTransfer() {
@@ -170,6 +194,7 @@ async function testChunkedJwtTransfer() {
 // Expose functions globally for integration
 window.sendJwtTokenToAndroidEventPicker = sendJwtTokenToAndroidEventPicker;
 window.getPhotoShareJwtTokenForAndroidChunked = getPhotoShareJwtTokenForAndroidChunked;
+window.getSilentJwtTokenForAndroid = getSilentJwtTokenForAndroid;
 window.testChunkedJwtTransfer = testChunkedJwtTransfer;
 
 // Auto-replace existing JWT function if it exists
