@@ -18,6 +18,7 @@ import com.getcapacitor.Plugin;
 import app.photoshare.EventPhotoPickerPlugin;
 import app.photoshare.AppPermissionsPlugin;
 import app.photoshare.CameraPreviewReplacementPlugin;
+import app.photoshare.EnhancedCameraPlugin;
 import java.util.ArrayList;
 
 public class MainActivity extends BridgeActivity {
@@ -26,7 +27,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         // Get current timestamp for build version tracking
-        String buildTimestamp = java.time.LocalDateTime.now().toString();
+        String buildTimestamp = String.valueOf(System.currentTimeMillis());
         Log.d("MainActivity", "🚀 APP LAUNCH - version = " + buildTimestamp);
         
         Log.d("MainActivity", "=== PLUGIN REGISTRATION STARTING ===");
@@ -41,6 +42,22 @@ public class MainActivity extends BridgeActivity {
         // Register AppPermissions plugin for onboarding
         registerPlugin(AppPermissionsPlugin.class);
         Log.d("MainActivity", "✅ AppPermissionsPlugin registered successfully");
+        
+        // Register EnhancedCamera plugin for camera + photo editor integration
+        registerPlugin(EnhancedCameraPlugin.class);
+        Log.d("MainActivity", "✅ EnhancedCameraPlugin registered successfully");
+        
+        // Register PhotoEditor plugin for photo editing capabilities
+        try {
+            @SuppressWarnings("unchecked")
+            Class<? extends Plugin> photoEditorClass = (Class<? extends Plugin>) Class.forName("io.capawesome.capacitorjs.plugins.photoeditor.PhotoEditorPlugin");
+            registerPlugin(photoEditorClass);
+            Log.d("MainActivity", "✅ PhotoEditorPlugin registered successfully");
+        } catch (ClassNotFoundException e) {
+            Log.w("MainActivity", "⚠️ PhotoEditorPlugin class not found - plugin may not be properly installed", e);
+        } catch (ClassCastException e) {
+            Log.w("MainActivity", "⚠️ PhotoEditorPlugin is not a valid Plugin class", e);
+        }
         
         // Register CameraPreviewReplacement plugin as "Camera" to intercept native calls
         Log.d("MainActivity", "✅ CameraPreviewReplacementPlugin registered as 'Camera' plugin");

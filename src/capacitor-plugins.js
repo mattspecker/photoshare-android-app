@@ -14,6 +14,9 @@ import { PushNotifications } from '@capacitor/push-notifications';
 // Register custom EventPhotoPicker plugin
 const EventPhotoPicker = registerPlugin('EventPhotoPicker');
 
+// Register PhotoEditor plugin
+const PhotoEditor = registerPlugin('PhotoEditor');
+
 // MODERN CAPACITOR 7 PLUGIN REGISTRATION FOR AppPermissions
 console.log('🚀 Registering AppPermissions using modern Capacitor 7 approach...');
 
@@ -134,6 +137,7 @@ function setupCapacitorAppBridge(appPermissionsPlugin) {
 // Legacy compatibility - also register on window.Capacitor.Plugins if needed
 if (window.Capacitor && window.Capacitor.Plugins) {
     window.Capacitor.Plugins.EventPhotoPicker = EventPhotoPicker;
+    window.Capacitor.Plugins.PhotoEditor = PhotoEditor;
     window.Capacitor.Plugins.AppPermissions = AppPermissions;
     window.Capacitor.Plugins.AppPermissionPlugin = AppPermissions;
 }
@@ -284,6 +288,257 @@ export async function selectFromGallery() {
       throw settingsError;
     }
     throw error;
+  }
+}
+
+// ============================================================================
+// 📸 ENHANCED CAMERA + PHOTO EDITOR INTEGRATION
+// Using standard Camera.getPhoto() → @capawesome/capacitor-photo-editor flow
+// ============================================================================
+
+// Enhanced camera function with optional photo editing
+export async function takePictureWithOptionalEditing(enableEditing = false) {
+  try {
+    console.log('📸 Taking picture with optional editing:', enableEditing);
+    
+    // Step 1: Request permissions using AppPermissions
+    console.log('📸 Requesting camera and photo permissions with AppPermissions...');
+    
+    const cameraResult = await AppPermissions.requestCameraPermission();
+    const photoResult = await AppPermissions.requestPhotoPermission();
+    
+    console.log('📸 Camera permission result:', cameraResult);
+    console.log('📸 Photo permission result:', photoResult);
+    
+    if (!cameraResult.granted || !photoResult.granted) {
+      const errors = [];
+      if (!cameraResult.granted) errors.push(cameraResult.error || 'Camera access denied');
+      if (!photoResult.granted) errors.push(photoResult.error || 'Photos access denied');
+      
+      throw new Error('Camera access required. Please go to Settings > Apps > PhotoShare > Permissions and enable Camera and Photos access. Details: ' + errors.join(', '));
+    }
+    
+    // Step 2: Capture photo using standard Camera
+    const capturedPhoto = await Camera.getPhoto({
+      quality: 90,
+      allowEditing: false,
+      resultType: CameraResultType.Uri,
+      source: CameraSource.Camera,
+      saveToGallery: true,
+      correctOrientation: true
+    });
+    
+    console.log('📸 Photo captured:', capturedPhoto.webPath);
+    
+    // Step 3: Optional editing with @capawesome/capacitor-photo-editor
+    if (enableEditing && capturedPhoto.webPath) {
+      console.log('🎨 Opening photo editor for:', capturedPhoto.webPath);
+      
+      const editedPhoto = await editPhotoWithCapacitor(capturedPhoto.webPath);
+      
+      return {
+        ...capturedPhoto,
+        webPath: editedPhoto.path || capturedPhoto.webPath,
+        edited: editedPhoto.edited,
+        originalPath: capturedPhoto.webPath,
+        editingResult: editedPhoto
+      };
+    }
+    
+    return {
+      ...capturedPhoto,
+      edited: false
+    };
+    
+  } catch (error) {
+    console.error('📸 Camera with optional editing failed:', error);
+    
+    // If it's a permission error, provide actionable guidance with Settings option
+    if (error.message.includes('permission') || error.message.includes('denied')) {
+      const settingsError = new Error('Camera access denied. Please enable Camera permission in Settings.');
+      settingsError.canOpenSettings = true;
+      throw settingsError;
+    }
+    throw error;
+  }
+}
+
+export async function selectFromGalleryWithOptionalEditing(enableEditing = false) {
+  try {
+    console.log('🖼️ Selecting from gallery with optional editing:', enableEditing);
+    
+    // Step 1: Request photo permission using AppPermissions
+    console.log('🖼️ Checking photo permissions with AppPermissions...');
+    
+    const photoResult = await AppPermissions.requestPhotoPermission();
+    console.log('🖼️ Photo permission result:', photoResult);
+    
+    if (!photoResult.granted) {
+      const errorMessage = photoResult.error || 'Photos access required. Please go to Settings > Apps > PhotoShare > Permissions and enable Photos access.';
+      throw new Error(errorMessage);
+    }
+    
+    // Step 2: Select photo using standard gallery picker
+    const selectedPhoto = await Camera.getPhoto({
+      quality: 90,
+      allowEditing: false,
+      resultType: CameraResultType.Uri,
+      source: CameraSource.Photos,
+      saveToGallery: false,
+      correctOrientation: true
+    });
+    
+    console.log('🖼️ Photo selected:', selectedPhoto.webPath);
+    
+    // Step 3: Optional editing
+    if (enableEditing && selectedPhoto.webPath) {
+      console.log('🎨 Opening photo editor for:', selectedPhoto.webPath);
+      
+      const editedPhoto = await editPhotoWithCapacitor(selectedPhoto.webPath);
+      
+      return {
+        ...selectedPhoto,
+        webPath: editedPhoto.path || selectedPhoto.webPath,
+        edited: editedPhoto.edited,
+        originalPath: selectedPhoto.webPath,
+        editingResult: editedPhoto
+      };
+    }
+    
+    return {
+      ...selectedPhoto,
+      edited: false
+    };
+    
+  } catch (error) {
+    console.error('🖼️ Gallery selection with optional editing failed:', error);
+    
+    // If it's a permission error, provide actionable guidance with Settings option
+    if (error.message.includes('permission') || error.message.includes('denied')) {
+      const settingsError = new Error('Photos access denied. Please enable Photos permission in Settings.');
+      settingsError.canOpenSettings = true;
+      throw settingsError;
+    }
+    throw error;
+  }
+}
+
+// Core photo editing function using @capawesome/capacitor-photo-editor
+async function editPhotoWithCapacitor(photoPath) {
+  try {
+    console.log('🎨 Starting photo editing for:', photoPath);
+    
+    // Check platform support (Android only)
+    const { Capacitor } = await import('@capacitor/core');
+    if (Capacitor.getPlatform() !== 'android') {
+      console.log('⚠️ Photo editing only available on Android');
+      return { path: photoPath, edited: false, reason: 'platform_unsupported' };
+    }
+    
+    // Check plugin availability
+    if (!Capacitor.isPluginAvailable('PhotoEditor')) {
+      console.log('⚠️ PhotoEditor plugin not available');
+      return { path: photoPath, edited: false, reason: 'plugin_unavailable' };
+    }
+    
+    // Normalize photo path for the plugin
+    const normalizedPath = normalizePhotoPath(photoPath);
+    console.log('🎨 Using normalized path:', normalizedPath);
+    
+    // Launch external photo editor
+    const result = await PhotoEditor.editPhoto({
+      path: normalizedPath
+    });
+    
+    console.log('🎨 ✅ Photo editing completed:', result);
+    
+    return {
+      path: normalizedPath, // Path remains same (edited in place)
+      edited: true,
+      success: true,
+      result: result
+    };
+    
+  } catch (error) {
+    console.error('🎨 ❌ Photo editing failed:', error);
+    
+    // Categorize errors for better UX
+    let reason = 'unknown_error';
+    if (error.message && error.message.includes('No app found')) {
+      reason = 'no_editor_app';
+    } else if (error.message && error.message.includes('Permission')) {
+      reason = 'permission_denied';
+    } else if (error.message && error.message.includes('File not found')) {
+      reason = 'file_not_found';
+    } else if (error.message && error.message.includes('cancelled')) {
+      reason = 'user_cancelled';
+    }
+    
+    // Return original path if editing fails
+    return {
+      path: photoPath,
+      edited: false,
+      error: error.message,
+      reason: reason
+    };
+  }
+}
+
+// Helper function to normalize photo paths for the PhotoEditor plugin
+function normalizePhotoPath(photoPath) {
+  // Handle different URI formats
+  if (photoPath.startsWith('file://')) {
+    return photoPath;
+  } else if (photoPath.startsWith('/')) {
+    return 'file://' + photoPath;
+  } else if (photoPath.startsWith('content://')) {
+    // Android content URI - may need conversion but try as-is first
+    return photoPath;
+  }
+  
+  return photoPath;
+}
+
+// Test function for photo editor integration
+export async function testPhotoEditor() {
+  try {
+    console.log('🧪 Testing photo editor integration...');
+    
+    const { Capacitor } = await import('@capacitor/core');
+    
+    // Check platform support
+    if (Capacitor.getPlatform() !== 'android') {
+      return { 
+        success: false, 
+        reason: 'platform_unsupported', 
+        message: 'Photo editor only available on Android' 
+      };
+    }
+    
+    // Check plugin availability
+    if (!Capacitor.isPluginAvailable('PhotoEditor')) {
+      return { 
+        success: false, 
+        reason: 'plugin_unavailable', 
+        message: 'PhotoEditor plugin not available' 
+      };
+    }
+    
+    console.log('✅ PhotoEditor plugin available on Android platform');
+    
+    return {
+      success: true,
+      platform: Capacitor.getPlatform(),
+      pluginAvailable: true,
+      message: 'Photo editor ready! Use takePictureWithOptionalEditing(true) or selectFromGalleryWithOptionalEditing(true)'
+    };
+  } catch (error) {
+    console.error('❌ Photo editor test failed:', error);
+    return { 
+      success: false, 
+      error: error.message,
+      reason: 'test_error'
+    };
   }
 }
 
@@ -1059,6 +1314,9 @@ if (typeof window !== 'undefined') {
     Camera: {
       takePicture,
       selectFromGallery,
+      takePictureWithOptionalEditing,
+      selectFromGalleryWithOptionalEditing,
+      testPhotoEditor,
       checkPermissions: checkCameraPermissions,
       requestPermissions: requestCameraPermissions,
     },
@@ -1274,3 +1532,137 @@ console.log('  • testCameraPreview() - Run full test');
 console.log('  • startCameraPreview() - Start preview');
 console.log('  • stopCameraPreview() - Stop preview');
 console.log('  • captureFromPreview() - Capture photo');
+
+// Debug: Check if PhotoEditor plugin is available
+console.log('🎨 PHOTO EDITOR DEBUG: Checking plugin availability...');
+console.log('🎨 PHOTO EDITOR DEBUG: PhotoEditor from registerPlugin:', typeof PhotoEditor);
+console.log('🎨 PHOTO EDITOR DEBUG: PhotoEditor methods from registration:', PhotoEditor ? Object.keys(PhotoEditor) : 'none');
+
+setTimeout(() => {
+  const { Capacitor } = window;
+  if (Capacitor && Capacitor.Plugins) {
+    console.log('🎨 PHOTO EDITOR DEBUG: All available plugins:', Object.keys(Capacitor.Plugins));
+    
+    if (Capacitor.Plugins.PhotoEditor) {
+      console.log('✅ PHOTO EDITOR DEBUG: PhotoEditor plugin found in Capacitor.Plugins!');
+      console.log('🎨 PHOTO EDITOR DEBUG: PhotoEditor methods:', Object.keys(Capacitor.Plugins.PhotoEditor));
+    } else {
+      console.error('❌ PHOTO EDITOR DEBUG: PhotoEditor plugin NOT found in Capacitor.Plugins');
+      console.log('🎨 PHOTO EDITOR DEBUG: Manual registration...', typeof PhotoEditor);
+      if (PhotoEditor && Capacitor.Plugins) {
+        Capacitor.Plugins.PhotoEditor = PhotoEditor;
+        console.log('✅ PHOTO EDITOR DEBUG: Manually registered PhotoEditor');
+      }
+    }
+    
+    // Check if our enhanced camera functions are available
+    if (window.CapacitorPlugins && window.CapacitorPlugins.Camera) {
+      console.log('✅ PHOTO EDITOR DEBUG: Enhanced camera functions available:', Object.keys(window.CapacitorPlugins.Camera));
+    } else {
+      console.error('❌ PHOTO EDITOR DEBUG: window.CapacitorPlugins.Camera not available');
+    }
+  } else {
+    console.error('❌ PHOTO EDITOR DEBUG: Capacitor.Plugins not available');
+  }
+}, 2000);
+
+// ============================================================================
+// 🌐 WEB HOOKS FOR CAMERA + PHOTO EDITOR INTEGRATION
+// Easy-to-use functions that the PhotoShare web app can call directly
+// ============================================================================
+
+// Create PhotoShare Camera with Editing web hooks
+if (typeof window !== 'undefined') {
+  window.PhotoShareCameraWithEditing = {
+    
+    // Standard quick photo (existing functionality preserved)
+    async takeQuickPhoto() {
+      console.log('📸 PhotoShare Web Hook: Taking quick photo (no editing)');
+      try {
+        const photo = await takePicture();
+        console.log('📸 Quick photo completed:', photo);
+        return photo;
+      } catch (error) {
+        console.error('📸 Quick photo failed:', error);
+        throw error;
+      }
+    },
+    
+    // Enhanced photo with editing option
+    async takePhotoWithEditing() {
+      console.log('📸 PhotoShare Web Hook: Taking photo with editing');
+      try {
+        const photo = await takePictureWithOptionalEditing(true);
+        console.log('📸 Photo with editing completed:', photo);
+        return photo;
+      } catch (error) {
+        console.error('📸 Photo with editing failed:', error);
+        throw error;
+      }
+    },
+    
+    // Gallery selection with editing
+    async selectFromGalleryWithEditing() {
+      console.log('🖼️ PhotoShare Web Hook: Selecting from gallery with editing');
+      try {
+        const photo = await selectFromGalleryWithOptionalEditing(true);
+        console.log('🖼️ Gallery photo with editing completed:', photo);
+        return photo;
+      } catch (error) {
+        console.error('🖼️ Gallery selection with editing failed:', error);
+        throw error;
+      }
+    },
+    
+    // Standard gallery selection (existing functionality preserved)
+    async selectFromGallery() {
+      console.log('🖼️ PhotoShare Web Hook: Standard gallery selection (no editing)');
+      try {
+        const photo = await selectFromGallery();
+        console.log('🖼️ Gallery photo completed:', photo);
+        return photo;
+      } catch (error) {
+        console.error('🖼️ Gallery selection failed:', error);
+        throw error;
+      }
+    },
+    
+    // Test photo editor availability
+    async testPhotoEditor() {
+      console.log('🧪 PhotoShare Web Hook: Testing photo editor');
+      try {
+        const result = await testPhotoEditor();
+        console.log('🧪 Photo editor test:', result);
+        return result;
+      } catch (error) {
+        console.error('🧪 Photo editor test failed:', error);
+        throw error;
+      }
+    },
+    
+    // EventPhotoPicker with editing support (future enhancement)
+    async openEventPhotoPickerWithEditing(options) {
+      console.log('🎪 PhotoShare Web Hook: Opening EventPhotoPicker with editing support');
+      try {
+        const result = await openEventPhotoPicker({
+          ...options,
+          enableEditing: true // Future enhancement when EventPhotoPicker supports editing
+        });
+        
+        console.log('🎪 EventPhotoPicker with editing completed:', result);
+        return result;
+      } catch (error) {
+        console.error('🎪 EventPhotoPicker with editing failed:', error);
+        throw error;
+      }
+    }
+  };
+  
+  console.log('🌐 PhotoShare Camera with Editing web hooks available:');
+  console.log('  • PhotoShareCameraWithEditing.takeQuickPhoto() - Standard camera (no editing)');
+  console.log('  • PhotoShareCameraWithEditing.takePhotoWithEditing() - Camera → Photo Editor');
+  console.log('  • PhotoShareCameraWithEditing.selectFromGalleryWithEditing() - Gallery → Photo Editor');
+  console.log('  • PhotoShareCameraWithEditing.selectFromGallery() - Standard gallery (no editing)');
+  console.log('  • PhotoShareCameraWithEditing.testPhotoEditor() - Test photo editor availability');
+  console.log('  • PhotoShareCameraWithEditing.openEventPhotoPickerWithEditing() - Event photos with editing');
+}

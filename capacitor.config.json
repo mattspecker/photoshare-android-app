@@ -31,6 +31,9 @@
       "skipNativeAuth": false,
       "providers": ["google.com"]
     },
+    "PhotoEditor": {
+      "enabled": true
+    },
     "SafeArea": {
       "enabled": true,
       "customColorsForSystemBars": true,
