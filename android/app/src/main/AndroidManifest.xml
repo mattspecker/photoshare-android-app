@@ -1,12 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Network permissions for auto-upload connectivity detection -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
+        android:hardwareAccelerated="true"
         android:theme="@style/AppTheme">
 
         <activity
@@ -15,6 +20,7 @@
             android:label="@string/title_activity_main"
             android:theme="@style/AppTheme.NoActionBarLaunch"
             android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize"
             android:exported="true">
 
             <intent-filter>
@@ -42,9 +48,13 @@
         <!-- MLKit Barcode Scanning Dependencies -->
         <meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="barcode_ui"/>
         
-        <!-- Firebase Messaging Service -->
-        <service android:name="com.google.firebase.messaging.FirebaseMessagingService" android:exported="false">
-            <intent-filter>
+        <!-- PhotoShare Custom Firebase Messaging Service for Rich Notifications -->
+        <service 
+            android:name=".PhotoShareMessagingService" 
+            android:exported="false"
+            android:enabled="true"
+            android:stopWithTask="false">
+            <intent-filter android:priority="1000">
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
@@ -58,7 +68,7 @@
             android:resource="@color/colorPrimary" />
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
-            android:value="photoshare_default_channel" />
+            android:value="photoshare_rich_channel" />
     </application>
 
     <!-- Permissions -->
@@ -86,6 +96,9 @@
     
     <!-- Settings access permission -->
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+    
+    <!-- Add overlay permission for native overlays -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     
     <!-- Camera feature -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />
