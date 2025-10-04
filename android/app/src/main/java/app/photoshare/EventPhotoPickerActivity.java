@@ -61,6 +61,24 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
     private long startMillis;
     private long endMillis;
     private Set<String> uploadedPhotoIds;
+    private EnhancedDuplicateDetector duplicateDetector;
+    
+    // Static field for passing duplicate detector between activities
+    private static EnhancedDuplicateDetector staticDuplicateDetector;
+    
+    /**
+     * Set the duplicate detector statically (called from plugin)
+     */
+    public static void setDuplicateDetector(EnhancedDuplicateDetector detector) {
+        staticDuplicateDetector = detector;
+    }
+    
+    /**
+     * Clear the static duplicate detector (for memory management)
+     */
+    public static void clearDuplicateDetector() {
+        staticDuplicateDetector = null;
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -76,19 +94,33 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
 
         initViews();
         extractIntentData();
+        
+        // Initialize duplicate detector from static field
+        duplicateDetector = staticDuplicateDetector;
+        if (duplicateDetector != null) {
+            Log.d(TAG, "📸 Initialized with enhanced duplicate detector: " + duplicateDetector.getDebugInfo());
+        } else {
+            Log.d(TAG, "📸 No enhanced duplicate detector available, using basic detection");
+        }
+        
         setupRecyclerView();
         setupButtons();
-        loadPhotos();
+        
+        // IMPROVED UX: Overlay is already visible by default, just update the text
+        Log.d(TAG, "🚀 Overlay visible by default for instant feedback");
+        updateOverlayText("Checking for duplicates...");
+        
+        // Start duplicate detection flow (existing logic but feels responsive)
+        waitForDuplicateDetectionAndLoadPhotos();
     }
     
     @Override
     protected void onResume() {
         super.onResume();
         
-        // Pre-load fresh chunked JWT token every time activity becomes active
-        // This ensures we have a fresh token whether it's a new launch or returning from background
-        Log.d(TAG, "🔄 EventPhotoPicker resumed - checking for fresh JWT token...");
-        preloadFreshChunkedToken();
+        // JWT token pre-loading commented out - only needed during upload flow, not photo selection
+        // Log.d(TAG, "🔄 EventPhotoPicker resumed - checking for fresh JWT token...");
+        // preloadFreshChunkedToken();
     }
 
     private void initViews() {
@@ -131,9 +163,27 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
     private void setupRecyclerView() {
         adapter = new PhotoGridAdapter(this);
         adapter.setOnSelectionChangedListener(this);
-        adapter.setUploadedPhotoIds(uploadedPhotoIds);
+        
+        // Set up adapter with enhanced duplicate detection if available
+        if (duplicateDetector != null) {
+            Log.d(TAG, "📸 Setting up adapter with enhanced duplicate detection");
+            adapter.setEnhancedDuplicateDetector(duplicateDetector);
+        } else {
+            Log.d(TAG, "📸 Setting up adapter with basic duplicate detection");
+            adapter.setUploadedPhotoIds(uploadedPhotoIds);
+        }
         
         GridLayoutManager layoutManager = new GridLayoutManager(this, 3);
+        
+        // Configure section headers to span full width (iOS-style)
+        layoutManager.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
+            @Override
+            public int getSpanSize(int position) {
+                // Section headers span all 3 columns, photos span 1 column
+                return adapter.getItemViewType(position) == SectionItem.TYPE_SECTION_HEADER ? 3 : 1;
+            }
+        });
+        
         recyclerPhotos.setLayoutManager(layoutManager);
         recyclerPhotos.setAdapter(adapter);
     }
@@ -151,7 +201,11 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
                 return;
             }
 
-            // Convert selected photos to base64 and return
+            // IMPROVED UX: Show upload overlay immediately for instant feedback
+            Log.d(TAG, "🚀 Showing upload overlay immediately after button click");
+            showUploadOverlayImmediately(selectedPhotos.size());
+            
+            // Process photos in background 
             processSelectedPhotos(selectedPhotos);
         });
     }
@@ -534,38 +588,11 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
         
         if (hasToken) {
             builder.setPositiveButton("Proceed with Upload", (dialog, which) -> {
-                Log.d(TAG, "✅ JWT token verified - proceeding with photo upload");
+                Log.d(TAG, "✅ JWT token verified - requesting fresh token from PhotoShareAuth");
                 dialog.dismiss();
                 
-                // Try to get fresh JWT token from chunking first
-                SharedPreferences prefs = getSharedPreferences("photoshare", MODE_PRIVATE);
-                String freshToken = prefs.getString("fresh_jwt_token", null);
-                long freshTokenTime = prefs.getLong("fresh_token_timestamp", 0);
-                
-                String sharedPrefsToken = null;
-                
-                // Check if we have a recent fresh token (within last 5 minutes)
-                if (freshToken != null && (System.currentTimeMillis() - freshTokenTime) < 300000) {
-                    Log.d(TAG, "✅ Using fresh JWT token from chunking (length: " + freshToken.length() + ", age: " + ((System.currentTimeMillis() - freshTokenTime) / 1000) + "s)");
-                    sharedPrefsToken = freshToken;
-                } else {
-                    // Fallback to monitoring token
-                    sharedPrefsToken = prefs.getString("current_jwt_token", null);
-                    Log.d(TAG, "🔄 Using fallback JWT from monitoring SharedPreferences: " + (sharedPrefsToken != null ? sharedPrefsToken.length() + " chars" : "null"));
-                }
-                
-                if (sharedPrefsToken != null && !sharedPrefsToken.isEmpty()) {
-                    Log.d(TAG, "✅ Using SharedPreferences JWT token for upload (length: " + sharedPrefsToken.length() + ")");
-                    
-                    // Show upload progress dialog
-                    showUploadProgressDialog(selectedPhotos.size());
-                    
-                    // Start upload with SharedPreferences token
-                    startUploadProcess(selectedPhotos, sharedPrefsToken);
-                } else {
-                    Log.e(TAG, "❌ No JWT token in SharedPreferences, falling back to normal flow");
-                    continueWithPhotoProcessing(selectedPhotos);
-                }
+                // Request fresh JWT token from PhotoShareAuth
+                requestJwtFromPhotoShareAuth(selectedPhotos);
             });
             builder.setNegativeButton("Cancel", (dialog, which) -> {
                 Log.d(TAG, "❌ User cancelled after token verification");
@@ -589,95 +616,183 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
         builder.show();
     }
     
-    private void continueWithPhotoProcessing(List<PhotoItem> selectedPhotos) {
-        Log.d(TAG, "🔥 Starting actual photo upload process with " + selectedPhotos.size() + " photos");
+    /**
+     * Request fresh JWT token from the web interface for upload authentication
+     * Uses chunked transfer to handle large tokens that exceed JavaScript return limits
+     * @param selectedPhotos Photos to upload after token is received
+     */
+    private void requestFreshJwtToken(List<PhotoItem> selectedPhotos) {
+        Log.d(TAG, "🔑 Requesting fresh JWT token for upload authentication");
         
-        // CHANGED: Try chunked JWT token FIRST (highest priority)
-        SharedPreferences prefs = getSharedPreferences("photoshare", MODE_PRIVATE);
-        String freshToken = prefs.getString("fresh_jwt_token", null);
-        long freshTokenTime = prefs.getLong("fresh_token_timestamp", 0);
-        
-        String jwtToken = null;
-        
-        // DEBUG: Show all available tokens
-        Log.d(TAG, "🔍 TOKEN DEBUG - Available tokens:");
-        Log.d(TAG, "🔍 Fresh token: " + (freshToken != null ? freshToken.length() + " chars" : "null"));
-        Log.d(TAG, "🔍 Fresh token timestamp: " + freshTokenTime + " (age: " + (freshTokenTime > 0 ? (System.currentTimeMillis() - freshTokenTime) / 1000 + "s" : "never") + ")");
-        
-        String monitoringToken = prefs.getString("current_jwt_token", null);
-        Log.d(TAG, "🔍 Monitoring token: " + (monitoringToken != null ? monitoringToken.length() + " chars" : "null"));
-        
-        // Token should already be pre-loaded from onResume() - just check status
-        Log.d(TAG, "🔄 Fresh token status: " + (freshToken != null ? "exists but age=" + ((System.currentTimeMillis() - freshTokenTime) / 1000) + "s" : "null"));
-        if (freshToken == null || (System.currentTimeMillis() - freshTokenTime) >= 300000) {
-            Log.w(TAG, "⚠️ Fresh token not available or expired - this should have been pre-loaded in onResume()");
-        }
-        
-        // PRIORITY: Use fresh chunked tokens first (now potentially auto-requested)
-        if (freshToken != null && (System.currentTimeMillis() - freshTokenTime) < 300000) {
-            Log.d(TAG, "✅ Using fresh JWT token from chunked transfer (length: " + freshToken.length() + ", age: " + ((System.currentTimeMillis() - freshTokenTime) / 1000) + "s)");
-            Log.d(TAG, "🔍 Fresh token preview: Token content available");
-            jwtToken = freshToken;
-        } else if (freshToken != null) {
-            Log.w(TAG, "⚠️ Fresh token still expired after auto-request (age: " + ((System.currentTimeMillis() - freshTokenTime) / 1000) + "s)");
-            Log.w(TAG, "⚠️ Falling back to monitoring token - upload may fail");
-            
-            // Fallback to monitoring token if long enough
-            if (monitoringToken != null && monitoringToken.length() > 500) {
-                Log.d(TAG, "✅ Using monitoring JWT token as fallback (length: " + monitoringToken.length() + ")");
-                Log.d(TAG, "🔍 Monitoring token preview: Token content available");
-                jwtToken = monitoringToken;
-            } else {
-                Log.e(TAG, "❌ No valid tokens available - monitoring token too short (" + (monitoringToken != null ? monitoringToken.length() : 0) + " chars)");
+        // Try to get WebView from Capacitor bridge via static access
+        try {
+            // Access MainActivity's WebView through Capacitor's bridge
+            WebView webView = getMainActivityWebView();
+            if (webView == null) {
+                Log.e(TAG, "❌ WebView not accessible for JWT token request");
+                showUploadError("Authentication token expired. Please refresh the PhotoShare page and try again.");
+                return;
             }
-        } else {
-            Log.w(TAG, "⚠️ Auto-request did not produce fresh token - using monitoring token");
             
-            // Last resort: use monitoring token if available and long enough
-            if (monitoringToken != null && monitoringToken.length() > 500) {
-                Log.d(TAG, "✅ Using monitoring JWT token as last resort (length: " + monitoringToken.length() + ")");
-                Log.d(TAG, "🔍 Monitoring token preview: Token content available");
-                jwtToken = monitoringToken;
-            } else {
-                Log.e(TAG, "❌ No valid tokens available after auto-request");
-            }
+            Log.d(TAG, "🔑 WebView found, requesting JWT token from web interface");
+            requestJwtTokenFromWebView(webView, selectedPhotos);
+            
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error accessing WebView for JWT token: " + e.getMessage());
+            showUploadError("Authentication token expired. Please refresh the page and try again.");
         }
-        
-        // Final check: If no good token found, try Intent as absolute last resort
-        if (jwtToken == null) {
-            Log.w(TAG, "⚠️ No valid JWT token from chunked or monitoring sources - trying Intent as last resort");
-            Intent intent = getIntent();
-            if (intent != null && intent.hasExtra("jwt_token")) {
-                String intentToken = intent.getStringExtra("jwt_token");
+    }
+    
+    /**
+     * Get MainActivity's WebView for JWT token requests
+     * Uses reflection to access Capacitor's bridge WebView
+     */
+    private WebView getMainActivityWebView() {
+        try {
+            Log.d(TAG, "🔍 Attempting to access MainActivity WebView via static reference");
+            
+            // Try to access WebView through MainActivity static method
+            try {
+                Log.d(TAG, "🔍 Attempting to get WebView via MainActivity.getStaticWebView()");
+                Class<?> mainActivityClass = Class.forName("app.photoshare.MainActivity");
+                java.lang.reflect.Method getWebViewMethod = mainActivityClass.getMethod("getStaticWebView");
+                WebView webView = (WebView) getWebViewMethod.invoke(null);
                 
-                if (intentToken != null && !intentToken.equals("NULL_TOKEN") && !intentToken.equals("ERROR_TOKEN") && !intentToken.equals("FUNCTION_NOT_FOUND") && intentToken.length() > 100) {
-                    Log.d(TAG, "⚠️ Using Intent JWT token as absolute last resort (length: " + intentToken.length() + ")");
-                    jwtToken = intentToken;
+                if (webView != null) {
+                    Log.d(TAG, "✅ WebView accessed via MainActivity static method");
+                    return webView;
                 } else {
-                    Log.e(TAG, "❌ Intent JWT token is also invalid or truncated: " + (intentToken != null ? "'" + intentToken + "'" : "null"));
+                    Log.w(TAG, "⚠️ MainActivity.getStaticWebView() returned null - MainActivity or bridge not ready");
                 }
-            } else {
-                Log.e(TAG, "❌ No JWT token available from any source");
+            } catch (Exception reflectionError) {
+                Log.e(TAG, "❌ Reflection access failed: " + reflectionError.getMessage());
+                reflectionError.printStackTrace();
             }
+            
+            Log.e(TAG, "❌ Could not access WebView via MainActivity static method");
+            return null;
+            
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error accessing MainActivity WebView: " + e.getMessage());
+            return null;
         }
+    }
+    
+    /**
+     * Request JWT token from WebView using JavaScript
+     */
+    private void requestJwtTokenFromWebView(WebView webView, List<PhotoItem> selectedPhotos) {
+        Log.d(TAG, "🔑 Executing JWT token request via WebView JavaScript");
         
-        if (jwtToken != null && jwtToken.length() > 100) {
-            Log.d(TAG, "📱 Using JWT token for upload (length: " + jwtToken.length() + ")");
-            Log.d(TAG, "🔍 TOKEN SOURCE DEBUG: About to pass token to startUploadProcess");
-            Log.d(TAG, "🔍 Token start: " + (jwtToken.length() > 50 ? jwtToken.substring(0, 50) : jwtToken));
-            Log.d(TAG, "🔍 Token end: " + (jwtToken.length() > 50 ? jwtToken.substring(jwtToken.length() - 50) : jwtToken));
+        // JavaScript to request JWT token with chunked transfer
+        String jsCode = 
+            "(function(){" +
+            "try{" +
+                "console.log('🔑 Android requesting fresh JWT token for upload');" +
+                "if(typeof window.getSilentJwtTokenForAndroid !== 'function'){" +
+                    "console.error('❌ getSilentJwtTokenForAndroid function not available');" +
+                    "return JSON.stringify({success:false,error:'JWT function not found'});" +
+                "}" +
+                "window.getSilentJwtTokenForAndroid().then(function(token){" +
+                    "console.log('✅ JWT token received (length: ' + (token ? token.length : 0) + ')');" +
+                    "if(token && token.length > 100){" +
+                        "window.androidJwtResult = JSON.stringify({success:true,token:token,length:token.length});" +
+                    "}else{" +
+                        "console.error('❌ Invalid JWT token received');" +
+                        "window.androidJwtResult = JSON.stringify({success:false,error:'Invalid token'});" +
+                    "}" +
+                "}).catch(function(error){" +
+                    "console.error('❌ JWT token request failed:',error);" +
+                    "window.androidJwtResult = JSON.stringify({success:false,error:error.message||error.toString()});" +
+                "});" +
+                "return 'JWT_REQUEST_STARTED';" +
+            "}catch(error){" +
+                "console.error('❌ JWT request error:',error);" +
+                "return JSON.stringify({success:false,error:error.message||error.toString()});" +
+            "}" +
+            "})()";
+        
+        // Execute JavaScript and poll for result
+        webView.evaluateJavascript(jsCode, result -> {
+            Log.d(TAG, "🔑 JWT request result: " + result);
             
-            // Show upload progress dialog
-            showUploadProgressDialog(selectedPhotos.size());
-            
-            // Start upload with token
-            startUploadProcess(selectedPhotos, jwtToken);
+            if ("\"JWT_REQUEST_STARTED\"".equals(result) || "JWT_REQUEST_STARTED".equals(result)) {
+                Log.d(TAG, "🔑 JWT request started, polling for token...");
+                pollForJwtResult(webView, selectedPhotos, 0);
+            } else {
+                Log.e(TAG, "❌ JWT request failed: " + result);
+                showUploadError("Unable to request fresh authentication token. Please refresh the page and try again.");
+            }
+        });
+    }
+    
+    /**
+     * Poll for JWT token result from WebView
+     */
+    private void pollForJwtResult(WebView webView, List<PhotoItem> selectedPhotos, int attempt) {
+        final int maxAttempts = 20; // 10 seconds
+        
+        if (attempt >= maxAttempts) {
+            Log.e(TAG, "❌ JWT token request timeout");
+            showUploadError("Authentication token request timeout. Please try again.");
             return;
         }
         
-        // If no valid token found from any source
-        Log.e(TAG, "❌ No valid JWT token available from any source (chunked, monitoring, or Intent)");
-        showUploadError("Authentication token not available. Please click the red button first to get a fresh token, then try again.");
+        webView.evaluateJavascript("window.androidJwtResult", result -> {
+            if (result != null && !result.equals("null") && !result.equals("undefined") && !result.trim().isEmpty()) {
+                Log.d(TAG, "🔑 JWT result: " + result.substring(0, Math.min(100, result.length())) + "...");
+                
+                try {
+                    // Parse JWT result
+                    String cleanResult = result.trim();
+                    if (cleanResult.startsWith("\"") && cleanResult.endsWith("\"")) {
+                        cleanResult = cleanResult.substring(1, cleanResult.length() - 1);
+                        cleanResult = cleanResult.replace("\\\"", "\"").replace("\\\\", "\\");
+                    }
+                    
+                    org.json.JSONObject responseObj = new org.json.JSONObject(cleanResult);
+                    boolean success = responseObj.optBoolean("success", false);
+                    
+                    if (success) {
+                        String jwtToken = responseObj.optString("token", "");
+                        int tokenLength = responseObj.optInt("length", 0);
+                        
+                        Log.d(TAG, "✅ Fresh JWT token received: " + tokenLength + " chars");
+                        
+                        // Cache the fresh token
+                        SharedPreferences prefs = getSharedPreferences("photoshare", MODE_PRIVATE);
+                        prefs.edit()
+                            .putString("fresh_jwt_token", jwtToken)
+                            .putLong("fresh_token_timestamp", System.currentTimeMillis())
+                            .apply();
+                        
+                        Log.d(TAG, "✅ JWT token cached, continuing with upload");
+                        
+                        // Continue with upload using fresh token
+                        continueWithPhotoProcessing(selectedPhotos);
+                    } else {
+                        String error = responseObj.optString("error", "Unknown error");
+                        Log.e(TAG, "❌ JWT token request failed: " + error);
+                        showUploadError("Authentication failed: " + error);
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "❌ Error parsing JWT result: " + e.getMessage());
+                    showUploadError("Authentication error. Please try again.");
+                }
+                return;
+            }
+            
+            // Continue polling
+            new Handler().postDelayed(() -> pollForJwtResult(webView, selectedPhotos, attempt + 1), 500);
+        });
+    }
+
+    private void continueWithPhotoProcessing(List<PhotoItem> selectedPhotos) {
+        Log.d(TAG, "🔥 Starting actual photo upload process with " + selectedPhotos.size() + " photos");
+        Log.d(TAG, "🔑 Using PhotoShareAuth for fresh JWT token...");
+        
+        // Always request fresh JWT token from PhotoShareAuth
+        requestJwtFromPhotoShareAuth(selectedPhotos);
     }
     
     private void startUploadProcess(List<PhotoItem> selectedPhotos, String jwtToken) {
@@ -1272,7 +1387,7 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
         Log.d(TAG, "🔄 PRE-LOADING fresh chunked JWT token...");
         
         // Check if we already have a fresh token (less than 5 minutes old)
-        SharedPreferences prefs = getSharedPreferences("PhotoSharePrefs", MODE_PRIVATE);
+        SharedPreferences prefs = getSharedPreferences("photoshare", MODE_PRIVATE);
         String freshToken = prefs.getString("fresh_jwt_token", null);
         long freshTokenTime = prefs.getLong("fresh_token_timestamp", 0);
         
@@ -1281,7 +1396,17 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
             return;
         }
         
+        // THROTTLING: Check if a JWT request is already in progress (within last 10 seconds)
+        long lastRequestTime = prefs.getLong("jwt_request_timestamp", 0);
+        if ((System.currentTimeMillis() - lastRequestTime) < 10000) {
+            Log.d(TAG, "🔄 JWT request already in progress (age: " + ((System.currentTimeMillis() - lastRequestTime) / 1000) + "s) - skipping duplicate request");
+            return;
+        }
+        
         Log.d(TAG, "🔄 No fresh token available or expired - pre-loading now...");
+        
+        // Mark that we're starting a JWT request to prevent duplicates
+        prefs.edit().putLong("jwt_request_timestamp", System.currentTimeMillis()).apply();
         
         // Request fresh chunked token via Capacitor WebView bridge (async)
         // Use Handler to delay slightly and ensure WebView is ready
@@ -1304,6 +1429,12 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
                 if (EventPhotoPickerPlugin.getLastBridge() != null) {
                     String javascript = 
                         "javascript:(async function() {" +
+                        "  // Check if Android is already requesting a JWT token to avoid double chunking" +
+                        "  if (window.androidJwtRequestInProgress) {" +
+                        "    console.log('🔇 AUTO: ⏭️ Skipping automatic pre-loading - Android JWT request already in progress');" +
+                        "    return 'skipped-android-request-in-progress';" +
+                        "  }" +
+                        "  " +
                         "  console.log('🔇 AUTO: Starting silent JWT pre-loading...');" +
                         "  if (window.getSilentJwtTokenForAndroid) {" +
                         "    try {" +
@@ -1338,6 +1469,210 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
         });
     }
     
+    /**
+     * Show iOS-style "Checking for duplicates" overlay while API and duplicate detection loads
+     */
+    /**
+     * Update overlay text (overlay is visible by default for instant feedback)
+     */
+    private void updateOverlayText(String text) {
+        TextView loadingText = findViewById(R.id.loading_text);
+        if (loadingText != null) {
+            loadingText.setText(text);
+        }
+        
+        // Update photo count text as well
+        if (tvPhotoCount != null) {
+            tvPhotoCount.setText("Loading photos...");
+        }
+    }
+    
+    private void showCheckingDuplicatesOverlay() {
+        Log.d(TAG, "📱 Showing 'Checking for duplicates' overlay (iOS-style)");
+        
+        // Show overlay that covers the photo grid
+        View loadingOverlay = findViewById(R.id.loading_overlay);
+        TextView loadingText = findViewById(R.id.loading_text);
+        
+        if (loadingOverlay != null) {
+            loadingOverlay.setVisibility(View.VISIBLE);
+        }
+        if (loadingText != null) {
+            loadingText.setText("Checking for duplicates...");
+        }
+        
+        // Hide photo count initially
+        if (tvPhotoCount != null) {
+            tvPhotoCount.setText("Loading photos...");
+        }
+    }
+    
+    /**
+     * Wait for duplicate detection to have uploaded photo data, then load and process device photos
+     */
+    private void waitForDuplicateDetectionAndLoadPhotos() {
+        Log.d(TAG, "📱 Starting iOS-style duplicate detection flow");
+        
+        // Check every 500ms if duplicate detector has uploaded photo data
+        Handler handler = new Handler();
+        Runnable checkDuplicateDetectorReady = new Runnable() {
+            int attempts = 0;
+            final int maxAttempts = 20; // 10 seconds max
+            
+            @Override
+            public void run() {
+                attempts++;
+                
+                if (duplicateDetector != null) {
+                    String debugInfo = duplicateDetector.getDebugInfo();
+                    Log.d(TAG, "📱 Attempt " + attempts + ": " + debugInfo);
+                    
+                    // Check if duplicate detector has data (non-zero entries)
+                    if (debugInfo.contains("hash entries") && !debugInfo.contains("0 hash entries")) {
+                        Log.d(TAG, "✅ Duplicate detector ready with API data - loading photos");
+                        loadPhotosWithDuplicateDetection();
+                        return;
+                    }
+                }
+                
+                if (attempts >= maxAttempts) {
+                    Log.w(TAG, "⚠️ Timeout waiting for duplicate detector - loading photos anyway");
+                    loadPhotosWithDuplicateDetection();
+                    return;
+                }
+                
+                // Check again in 500ms
+                handler.postDelayed(this, 500);
+            }
+        };
+        
+        // Start checking
+        handler.postDelayed(checkDuplicateDetectorReady, 500);
+    }
+    
+    /**
+     * Load photos and run duplicate detection with available API data (iOS-style)
+     */
+    private void loadPhotosWithDuplicateDetection() {
+        Log.d(TAG, "📱 Loading photos with duplicate detection (iOS-style)");
+        
+        // Load device photos first
+        loadPhotos();
+        
+        // Hide the overlay and show results
+        hideCheckingDuplicatesOverlay();
+        
+        Log.d(TAG, "📱 iOS-style photo loading complete");
+    }
+    
+    /**
+     * Hide the "Checking for duplicates" overlay
+     */
+    private void hideCheckingDuplicatesOverlay() {
+        Log.d(TAG, "📱 Hiding 'Checking for duplicates' overlay");
+        
+        View loadingOverlay = findViewById(R.id.loading_overlay);
+        if (loadingOverlay != null) {
+            loadingOverlay.setVisibility(View.GONE);
+        }
+    }
+    
+    /**
+     * Show upload overlay immediately for instant feedback when user clicks "Select Photos" button
+     */
+    private void showUploadOverlayImmediately(int photoCount) {
+        Log.d(TAG, "🚀 Showing upload overlay immediately for " + photoCount + " photos");
+        
+        // Show the overlay that's already in the layout
+        View loadingOverlay = findViewById(R.id.loading_overlay);
+        TextView loadingText = findViewById(R.id.loading_text);
+        
+        if (loadingOverlay != null) {
+            loadingOverlay.setVisibility(View.VISIBLE);
+        }
+        
+        if (loadingText != null) {
+            loadingText.setText("Uploading " + photoCount + " photos...");
+        }
+        
+        Log.d(TAG, "✅ Upload overlay shown immediately - no delay!");
+    }
+    
+    /**
+     * Request JWT token from PhotoShareAuth and start upload process
+     * @param selectedPhotos List of photos to upload
+     */
+    private void requestJwtFromPhotoShareAuth(List<PhotoItem> selectedPhotos) {
+        Log.d(TAG, "🔑 Requesting JWT token from PhotoShareAuth for " + selectedPhotos.size() + " photos");
+        
+        // STRATEGY: Trigger PhotoShareAuth, then wait briefly and get the assembled token directly
+        WebView webView = getMainActivityWebView();
+        if (webView == null) {
+            Log.e(TAG, "❌ WebView not accessible for PhotoShareAuth");
+            showUploadError("Authentication service not available. Please try again.");
+            return;
+        }
+        
+        runOnUiThread(() -> {
+            Log.d(TAG, "🔑 Triggering PhotoShareAuth token request");
+            
+            // FIXED: Simple JavaScript to trigger PhotoShareAuth (no async return needed)
+            String jsCode = 
+                "(function(){" +
+                "try{" +
+                    "console.log('🔑 EventPhotoPickerActivity triggering PhotoShareAuth');" +
+                    "if(window.Capacitor?.Plugins?.PhotoShareAuth){" +
+                        "window.Capacitor.Plugins.PhotoShareAuth.getJwtToken();" +
+                        "return 'TRIGGERED';" +
+                    "} else {" +
+                        "return 'NOT_AVAILABLE';" +
+                    "}" +
+                "}catch(error){" +
+                    "return 'ERROR';" +
+                "}" +
+                "})()";
+            
+            webView.evaluateJavascript(jsCode, result -> {
+                Log.d(TAG, "🔑 PhotoShareAuth trigger result: " + result);
+                
+                if (result != null && result.contains("TRIGGERED")) {
+                    Log.d(TAG, "✅ PhotoShareAuth triggered successfully, waiting for token assembly...");
+                    // Wait for PhotoShareAuth to assemble token, then get it directly
+                    new android.os.Handler().postDelayed(() -> {
+                        checkForAssembledToken(selectedPhotos, 0);
+                    }, 3000); // Wait 3 seconds for token assembly
+                } else {
+                    Log.e(TAG, "❌ Failed to trigger PhotoShareAuth: " + result);
+                    showUploadError("Authentication service not available. Please try again.");
+                }
+            });
+        });
+    }
+    
+    private void checkForAssembledToken(List<PhotoItem> selectedPhotos, int attempt) {
+        Log.d(TAG, "🔑 Checking for assembled token (attempt " + (attempt + 1) + ")");
+        
+        String token = PhotoShareAuthPlugin.getLastAssembledToken();
+        if (token != null) {
+            Log.d(TAG, "✅ Got assembled token from PhotoShareAuth (length: " + token.length() + ")");
+            Log.d(TAG, "🚀 Starting upload with PhotoShareAuth token");
+            
+            // Show upload progress dialog
+            showUploadProgressDialog(selectedPhotos.size());
+            
+            // Start upload with fresh token
+            startUploadProcess(selectedPhotos, token);
+        } else if (attempt < 5) { // Try up to 5 times (10 seconds total)
+            Log.d(TAG, "🔑 Token not ready yet, waiting 2 more seconds...");
+            new android.os.Handler().postDelayed(() -> {
+                checkForAssembledToken(selectedPhotos, attempt + 1);
+            }, 2000);
+        } else {
+            Log.e(TAG, "❌ Timeout waiting for PhotoShareAuth token");
+            showUploadError("Authentication timeout. Please try again.");
+        }
+    }
+    
     @Override
     protected void onDestroy() {
         super.onDestroy();
@@ -1347,5 +1682,8 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
             uploadProgressDialog.dismiss();
             uploadProgressDialog = null;
         }
+        
+        // Clear static duplicate detector reference to prevent memory leaks
+        clearDuplicateDetector();
     }
 }

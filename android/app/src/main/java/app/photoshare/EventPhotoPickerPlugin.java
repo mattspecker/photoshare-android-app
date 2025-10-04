@@ -52,12 +52,6 @@ public class EventPhotoPickerPlugin extends Plugin {
         return lastBridge;
     }
 
-    @Override
-    public void load() {
-        super.load();
-        lastBridge = getBridge(); // Store bridge reference for activity access
-        Log.d("EventPhotoPicker", "🔥 EventPhotoPicker Plugin Loading");
-    }
 
     @PluginMethod
     public void testPlugin(PluginCall call) {
@@ -520,7 +514,22 @@ public class EventPhotoPickerPlugin extends Plugin {
         return "PARSE_FAILED: '" + utcTimeString + "' - Check logcat for details";
     }
 
-    // JWT Token Chunking - for handling long JWT tokens that WebView can't transfer
+    // Centralized JWT Token Manager
+    private JwtTokenManager jwtTokenManager;
+    
+    // Enhanced Duplicate Detection
+    private EnhancedDuplicateDetector duplicateDetector;
+    
+    @Override
+    public void load() {
+        super.load();
+        lastBridge = getBridge(); // Store bridge reference for activity access
+        jwtTokenManager = JwtTokenManager.getInstance(getContext());
+        duplicateDetector = new EnhancedDuplicateDetector(getContext());
+        Log.d("EventPhotoPicker", "🔥 EventPhotoPicker Plugin Loading with centralized JWT manager and enhanced duplicate detection");
+    }
+
+    // JWT Token Chunking - integrate with centralized manager
     private StringBuilder jwtTokenBuilder = new StringBuilder();
     private int expectedChunks = 0;
     private int receivedChunks = 0;
@@ -528,66 +537,27 @@ public class EventPhotoPickerPlugin extends Plugin {
 
     @PluginMethod
     public void sendJwtChunk(PluginCall call) {
-        String chunk = call.getString("chunk");
-        int index = call.getInt("index", -1);
-        int total = call.getInt("total", 0);
-        String requestId = call.getString("requestId", "default");
+        // Forward JWT chunks to PhotoShareAuthPlugin for centralized handling
+        Log.d("EventPhotoPicker", "🔄 Forwarding JWT chunk to PhotoShareAuthPlugin");
         
-        Log.d("EventPhotoPicker", "🧩 Received JWT chunk " + (index + 1) + "/" + total + " (length: " + (chunk != null ? chunk.length() : 0) + ")");
-        
-        // Reset if new token request
-        if (!requestId.equals(tokenRequestId)) {
-            Log.d("EventPhotoPicker", "🔄 Starting new JWT token assembly (ID: " + requestId + ")");
-            jwtTokenBuilder = new StringBuilder();
-            receivedChunks = 0;
-            expectedChunks = total;
-            tokenRequestId = requestId;
-        }
-        
-        // Store chunk at correct position (for now, assume sequential)
-        if (chunk != null && index >= 0) {
-            jwtTokenBuilder.append(chunk);
-            receivedChunks++;
-            
-            Log.d("EventPhotoPicker", "📦 Assembled " + receivedChunks + "/" + expectedChunks + " chunks (total length: " + jwtTokenBuilder.length() + ")");
-            
-            // Check if we have all chunks
-            if (receivedChunks >= expectedChunks) {
-                String fullToken = jwtTokenBuilder.toString();
-                Log.d("EventPhotoPicker", "✅ JWT token fully assembled! Length: " + fullToken.length());
+        try {
+            // Get PhotoShareAuthPlugin instance via PluginHandle
+            com.getcapacitor.PluginHandle authPluginHandle = getBridge().getPlugin("PhotoShareAuth");
+            if (authPluginHandle != null && authPluginHandle.getInstance() instanceof PhotoShareAuthPlugin) {
+                PhotoShareAuthPlugin photoShareAuth = (PhotoShareAuthPlugin) authPluginHandle.getInstance();
                 
-                // Validate JWT structure
-                String[] parts = fullToken.split("\\.");
-                Log.d("EventPhotoPicker", "🔍 JWT parts: " + parts.length + " (should be 3)");
+                // Forward the chunk to PhotoShareAuth
+                photoShareAuth.sendJwtChunk(call);
                 
-                if (parts.length == 3) {
-                    // Store the assembled token and use it for upload
-                    storeAssembledJwtToken(fullToken);
-                    
-                    String preview = fullToken.length() > 40 ? 
-                        fullToken.substring(0, 20) + "..." + fullToken.substring(fullToken.length() - 20) : 
-                        fullToken;
-                    Log.d("EventPhotoPicker", "🔍 JWT Preview: " + preview);
-                    Log.d("EventPhotoPicker", "🔇 JWT token assembled silently - no dialog shown (seamless flow)");
-                    
-                } else {
-                    Log.e("EventPhotoPicker", "❌ Assembled token has invalid JWT structure: " + parts.length + " parts");
-                }
+                Log.d("EventPhotoPicker", "✅ JWT chunk forwarded successfully to PhotoShareAuth");
+            } else {
+                Log.e("EventPhotoPicker", "❌ PhotoShareAuthPlugin not found or wrong type");
+                call.reject("PhotoShareAuthPlugin not available");
             }
+        } catch (Exception e) {
+            Log.e("EventPhotoPicker", "❌ Error forwarding JWT chunk: " + e.getMessage(), e);
+            call.reject("Failed to forward JWT chunk: " + e.getMessage());
         }
-        
-        call.resolve();
-    }
-    
-    private void storeAssembledJwtToken(String token) {
-        // Store in SharedPreferences for upload use
-        SharedPreferences prefs = getContext().getSharedPreferences("photoshare", Context.MODE_PRIVATE);
-        prefs.edit()
-            .putString("fresh_jwt_token", token)
-            .putLong("fresh_token_timestamp", System.currentTimeMillis())
-            .apply();
-        
-        Log.d("EventPhotoPicker", "💾 Stored fresh JWT token for upload use");
     }
 
 
@@ -597,40 +567,68 @@ public class EventPhotoPickerPlugin extends Plugin {
         Log.d("EventPhotoPicker", "🔥🔥🔥 Plugin is working and method was called successfully! 🔥🔥🔥");
         Log.d("EventPhotoPicker", "Call data: " + call.getData().toString());
         
-        // Stage 5: Check permissions first
+        // Stage 1: Extract event data from JavaScript call
+        String eventId = call.getString("eventId", "No event ID");
+        String eventName = call.getString("eventName", "No event name");
+        String startTime = call.getString("startTime", "No start time");
+        String endTime = call.getString("endTime", "No end time");
+        
+        // Convert UTC times to milliseconds for photo filtering
+        long startMillis = convertUTCToMilliseconds(startTime);
+        long endMillis = convertUTCToMilliseconds(endTime);
+        
+        if (startMillis == -1 || endMillis == -1) {
+            call.reject("Invalid start or end time");
+            return;
+        }
+        
+        // Stage 2: Check permissions first
         if (!hasMediaPermission()) {
             Log.d("EventPhotoPicker", "Media permission not granted, showing permission dialog");
             showPermissionDialog(call);
             return;
         }
         
+        // IMPROVED UX: Launch activity immediately, fetch API data in background
+        Log.d("EventPhotoPicker", "🚀 Launching photo picker immediately for instant response");
+        
+        // Start background API fetch (non-blocking)
+        Log.d("EventPhotoPicker", "📡 Starting background fetch of uploaded photo identifiers");
+        duplicateDetector.loadUploadedPhotoIdentifiers(getBridge().getWebView(), eventId)
+            .thenAccept(identifiers -> {
+                Log.d("EventPhotoPicker", "✅ Background fetch complete: Loaded " + identifiers.size() + " uploaded photo identifiers");
+            })
+            .exceptionally(throwable -> {
+                Log.w("EventPhotoPicker", "⚠️ Background fetch failed: " + throwable.getMessage());
+                return null;
+            });
+        
+        // Launch activity immediately (don't wait for API)
+        proceedWithPhotoSelection(call, eventId, eventName, startTime, endTime, startMillis, endMillis);
+    }
+    
+    /**
+     * Continue with photo selection after duplicate detection setup
+     */
+    private void proceedWithPhotoSelection(PluginCall call, String eventId, String eventName, 
+                                         String startTime, String endTime, long startMillis, long endMillis) {
+        
         Log.d("EventPhotoPicker", "✅ Media permissions granted, proceeding with photo picker");
         
         // Stage 4: Launch EventPhotoPickerActivity with full photo grid UI
         try {
-            // Extract event data from JavaScript call
-            String eventId = call.getString("eventId", "No event ID");
-            String eventName = call.getString("eventName", "No event name");
-            String startTime = call.getString("startTime", "No start time");
-            String endTime = call.getString("endTime", "No end time");
+            // Extract additional data from JavaScript call (timezone for compatibility)
             String eventTimezone = call.getString("timezone", "No timezone");
             
-            // Convert UTC times to milliseconds for photo filtering
-            long startMillis = convertUTCToMilliseconds(startTime);
-            long endMillis = convertUTCToMilliseconds(endTime);
-            
-            if (startMillis == -1 || endMillis == -1) {
-                call.reject("Invalid start or end time");
-                return;
-            }
-            
-            // Get uploaded photo IDs (if provided)
+            // Get uploaded photo IDs (if provided) - keep for backward compatibility
             String[] uploadedPhotoIds = call.getArray("uploadedPhotoIds") != null ? 
                 call.getArray("uploadedPhotoIds").toList().toArray(new String[0]) : new String[0];
             
-            // Launch photo picker directly (no JWT needed for photo selection)
-            Log.d("EventPhotoPicker", "Launching EventPhotoPicker for photo selection...");
-            launchEventPhotoPickerActivity(eventId, eventName, startTime, endTime, startMillis, endMillis, uploadedPhotoIds, call);
+            Log.d("EventPhotoPicker", "Using enhanced duplicate detection with " + duplicateDetector.getDebugInfo());
+            
+            // Launch photo picker with enhanced duplicate detection
+            Log.d("EventPhotoPicker", "Launching EventPhotoPicker with enhanced duplicate detection...");
+            launchEventPhotoPickerActivityEnhanced(eventId, eventName, startTime, endTime, startMillis, endMillis, uploadedPhotoIds, call);
             
         } catch (Exception e) {
             Log.e("EventPhotoPicker", "Error launching EventPhotoPickerActivity: " + e.getMessage(), e);
@@ -638,9 +636,9 @@ public class EventPhotoPickerPlugin extends Plugin {
         }
     }
     
-    private void launchEventPhotoPickerActivity(String eventId, String eventName, String startTime, 
-                                               String endTime, long startMillis, long endMillis, 
-                                               String[] uploadedPhotoIds, PluginCall call) {
+    private void launchEventPhotoPickerActivityEnhanced(String eventId, String eventName, String startTime, 
+                                                       String endTime, long startMillis, long endMillis, 
+                                                       String[] uploadedPhotoIds, PluginCall call) {
         Log.d("EventPhotoPicker", "=== LAUNCHING EVENT PHOTO PICKER ACTIVITY ===");
         Log.d("EventPhotoPicker", "Event: " + eventName + " (" + eventId + ")");
         Log.d("EventPhotoPicker", "Time range: " + startTime + " to " + endTime);
@@ -662,99 +660,44 @@ public class EventPhotoPickerPlugin extends Plugin {
             Log.w("EventPhotoPicker", "This might be normal if no photos were taken during the event");
         }
         
-        // Get fresh JWT token before launching EventPhotoPickerActivity
-        Log.d("EventPhotoPicker", "🔄 Getting fresh JWT token before launching photo picker...");
+        // JWT token logic commented out - only needed during upload flow, not photo selection
+        // Log.d("EventPhotoPicker", "🔄 Getting fresh JWT token via centralized manager...");
+        // 
+        // jwtTokenManager.getFreshJwtToken(getBridge().getWebView(), "EventPhotoPicker")
+        //     .thenAccept(jwtToken -> {
+        //         Log.d("EventPhotoPicker", "🔍 JWT token received from manager: " + (jwtToken != null ? jwtToken.length() + " chars" : "null"));
         
-        // WebView must be called from main UI thread
-        getActivity().runOnUiThread(() -> {
-            getBridge().getWebView().evaluateJavascript(
-            "(async () => { " +
-            "  try { " +
-            "    if (window.getPhotoShareJwtTokenForAndroid) { " +
-            "      const token = await window.getPhotoShareJwtTokenForAndroid(); " +
-            "      console.log('🔥 JWT token for EventPhotoPicker:', token ? 'TOKEN_' + token.length + '_CHARS' : 'null'); " +
-            "      return token || 'null'; " +
-            "    } else { " +
-            "      return 'FUNCTION_NOT_FOUND'; " +
-            "    } " +
-            "  } catch (error) { " +
-            "    console.error('🔥 JWT error in plugin:', error); " +
-            "    return 'ERROR_TOKEN'; " +
-            "  } " +
-            "})()",
-            jwtResult -> {
-                Log.d("EventPhotoPicker", "🔍 RAW JWT result from JavaScript: " + (jwtResult != null ? "'" + jwtResult + "'" : "null"));
-                
-                // Launch EventPhotoPickerActivity with JWT token
-                try {
-                    String jwtToken = "NULL_TOKEN";
-                    
-                    if (jwtResult != null) {
-                        Log.d("EventPhotoPicker", "🔍 Processing jwtResult: '" + jwtResult + "' (length: " + jwtResult.length() + ")");
-                        
-                        // FIXED: Only remove surrounding quotes from evaluateJavascript result
-                        String cleanToken = jwtResult;
-                        if (cleanToken.startsWith("\"") && cleanToken.endsWith("\"")) {
-                            Log.d("EventPhotoPicker", "🔍 Removing quotes from: '" + cleanToken + "'");
-                            cleanToken = cleanToken.substring(1, cleanToken.length() - 1);
-                            Log.d("EventPhotoPicker", "🔍 After quote removal: '" + cleanToken + "' (length: " + cleanToken.length() + ")");
-                        } else {
-                            Log.d("EventPhotoPicker", "🔍 No quotes to remove from: '" + cleanToken + "'");
-                        }
-                        
-                        // Check if we got a valid token (not 'null' string)
-                        if (!cleanToken.equals("null") && !cleanToken.equals("FUNCTION_NOT_FOUND") && !cleanToken.equals("ERROR_TOKEN") && !cleanToken.isEmpty()) {
-                            jwtToken = cleanToken;
-                            Log.d("EventPhotoPicker", "✅ Valid JWT token received (length: " + jwtToken.length() + ")");
-                        } else {
-                            Log.e("EventPhotoPicker", "❌ Invalid or missing JWT token: '" + cleanToken + "'");
-                        }
-                    } else {
-                        Log.e("EventPhotoPicker", "❌ jwtResult is null");
-                    }
-                    
-                    Log.d("EventPhotoPicker", "🔍 FINAL JWT token: " + (jwtToken.equals("NULL_TOKEN") ? jwtToken : jwtToken.length() + " chars"));
-                    Log.d("EventPhotoPicker", "🔍 FINAL JWT token content: '" + jwtToken + "'"); // Show actual content for debugging
-                    
-                    // Show token preview for debugging
-                    if (!jwtToken.equals("NULL_TOKEN") && !jwtToken.equals("ERROR_TOKEN") && !jwtToken.equals("FUNCTION_NOT_FOUND")) {
-                        String preview = jwtToken.length() > 40 ? 
-                            jwtToken.substring(0, 20) + "..." + jwtToken.substring(jwtToken.length() - 20) : 
-                            jwtToken;
-                        Log.d("EventPhotoPicker", "🔍 JWT Preview: " + preview);
-                        
-                        // Debug: Check JWT structure
-                        String[] parts = jwtToken.split("\\.");
-                        Log.d("EventPhotoPicker", "🔍 JWT parts: " + parts.length + " (should be 3)");
-                    }
-                    
-                    Intent intent = new Intent(getActivity(), EventPhotoPickerActivity.class);
-                    intent.putExtra("event_id", eventId);
-                    intent.putExtra("event_name", eventName);
-                    intent.putExtra("start_time", startTime);
-                    intent.putExtra("end_time", endTime);
-                    intent.putExtra("deviceStartTime", deviceStartTime);
-                    intent.putExtra("deviceEndTime", deviceEndTime);
-                    intent.putExtra("start_millis", startMillis);
-                    intent.putExtra("end_millis", endMillis);
-                    intent.putExtra("uploaded_photo_ids", uploadedPhotoIds);
-                    intent.putExtra("photoCount", photoCount);
-                    intent.putExtra("jwt_token", jwtToken); // Pass JWT token as Intent extra
-                    
-                    // Save the call for result handling
-                    saveCall(call);
-                    
-                    Log.d("EventPhotoPicker", "🚀 Launching EventPhotoPickerActivity with JWT token (length: " + 
-                        (jwtToken.equals("NULL_TOKEN") || jwtToken.equals("ERROR_TOKEN") || jwtToken.equals("FUNCTION_NOT_FOUND") ? 
-                         jwtToken : jwtToken.length()) + ")");
-                    startActivityForResult(call, intent, 1001);
-                    
-                } catch (Exception e) {
-                    Log.e("EventPhotoPicker", "Failed to launch EventPhotoPickerActivity: " + e.getMessage(), e);
-                    call.reject("Failed to launch photo picker: " + e.getMessage());
-                }
-            });
-        });
+        Log.d("EventPhotoPicker", "🚀 Launching photo picker directly (JWT token will be requested during upload only)");
+        
+        try {
+            Intent intent = new Intent(getActivity(), EventPhotoPickerActivity.class);
+            intent.putExtra("event_id", eventId);
+            intent.putExtra("event_name", eventName);
+            intent.putExtra("start_time", startTime);
+            intent.putExtra("end_time", endTime);
+            intent.putExtra("deviceStartTime", deviceStartTime);
+            intent.putExtra("deviceEndTime", deviceEndTime);
+            intent.putExtra("start_millis", startMillis);
+            intent.putExtra("end_millis", endMillis);
+            intent.putExtra("uploaded_photo_ids", uploadedPhotoIds);
+            intent.putExtra("photoCount", photoCount);
+            // JWT token commented out - will be requested during actual upload
+            // intent.putExtra("jwt_token", jwtToken != null ? jwtToken : "NULL_TOKEN");
+            
+            // Pass enhanced duplicate detector to activity
+            // Note: We'll access the detector via static method since Android doesn't allow
+            // passing complex objects through intents easily
+            EventPhotoPickerActivity.setDuplicateDetector(duplicateDetector);
+            
+            saveCall(call);
+            
+            Log.d("EventPhotoPicker", "🚀 Launching EventPhotoPickerActivity without JWT token (requested during upload only)");
+            startActivityForResult(call, intent, 1001);
+            
+        } catch (Exception e) {
+            Log.e("EventPhotoPicker", "Failed to launch EventPhotoPickerActivity: " + e.getMessage(), e);
+            call.reject("Failed to launch photo picker: " + e.getMessage());
+        }
     }
     
     @Override

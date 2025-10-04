@@ -62,16 +62,49 @@
 
     </LinearLayout>
 
-    <!-- Photo Grid -->
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/recycler_photos"
+    <!-- Photo Grid Container with Loading Overlay -->
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
-        android:padding="8dp"
-        android:clipToPadding="false"
-        app:layoutManager="androidx.recyclerview.widget.GridLayoutManager"
-        app:spanCount="3" />
+        android:layout_weight="1">
+        
+        <!-- Photo Grid -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/recycler_photos"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:padding="8dp"
+            android:clipToPadding="false"
+            app:layoutManager="androidx.recyclerview.widget.GridLayoutManager"
+            app:spanCount="3" />
+        
+        <!-- iOS-style Loading Overlay - VISIBLE BY DEFAULT for instant feedback -->
+        <LinearLayout
+            android:id="@+id/loading_overlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="#E6000000"
+            android:visibility="visible">
+            
+            <ProgressBar
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:indeterminateTint="#C084FC" />
+            
+            <TextView
+                android:id="@+id/loading_text"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Checking for duplicates..."
+                android:textSize="16sp"
+                android:textColor="#FAFAFA"
+                android:layout_marginTop="16dp" />
+                
+        </LinearLayout>
+        
+    </FrameLayout>
 
     <!-- Bottom Buttons -->
     <LinearLayout
