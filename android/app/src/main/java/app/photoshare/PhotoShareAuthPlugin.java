@@ -46,6 +46,24 @@ public class PhotoShareAuthPlugin extends Plugin {
     public void getJwtToken(PluginCall call) {
         Log.d(TAG, "🔑 Requesting JWT token via chunked transfer");
         
+        // Check if we already have a valid token
+        if (lastAssembledToken != null && !JwtTokenUtils.isJwtExpired(lastAssembledToken)) {
+            long tokenAge = System.currentTimeMillis() - lastTokenTimestamp;
+            Log.d(TAG, "✅ Using cached JWT token (age: " + (tokenAge / 1000) + " seconds)");
+            
+            JSObject result = new JSObject();
+            result.put("success", true);
+            result.put("token", lastAssembledToken);
+            result.put("length", lastAssembledToken.length());
+            result.put("cached", true);
+            result.put("ageSeconds", tokenAge / 1000);
+            
+            call.resolve(result);
+            return;
+        }
+        
+        Log.d(TAG, "🔄 No valid cached token, fetching new one...");
+        
         try {
             // Web will generate its own requestId - we'll track it when chunks arrive
             activeTokenRequest = new CompletableFuture<>();
@@ -290,6 +308,72 @@ public class PhotoShareAuthPlugin extends Plugin {
         
         Log.d(TAG, "📊 Debug info: " + debugInfo.toString());
         call.resolve(debugInfo);
+    }
+    
+    /**
+     * Test JWT token extraction - extracts user ID from the last assembled token
+     * @param call Capacitor plugin call
+     */
+    @PluginMethod
+    public void testJwtExtraction(PluginCall call) {
+        Log.d(TAG, "🧪 Testing JWT token extraction");
+        
+        JSObject result = new JSObject();
+        
+        if (lastAssembledToken == null) {
+            Log.w(TAG, "❌ No JWT token available - need to call getJwtToken first");
+            result.put("success", false);
+            result.put("error", "No JWT token available");
+            call.resolve(result);
+            return;
+        }
+        
+        try {
+            // Log token info
+            Log.d(TAG, "🔍 JWT Token length: " + lastAssembledToken.length() + " characters");
+            Log.d(TAG, "🔍 Token preview: " + lastAssembledToken.substring(0, Math.min(50, lastAssembledToken.length())) + "...");
+            
+            // Extract user ID
+            String userId = JwtTokenUtils.extractUserIdFromJwt(lastAssembledToken);
+            
+            // Extract email
+            String email = JwtTokenUtils.extractEmailFromJwt(lastAssembledToken);
+            
+            // Check expiration
+            boolean isExpired = JwtTokenUtils.isJwtExpired(lastAssembledToken);
+            
+            // Get full payload for debugging
+            org.json.JSONObject payload = JwtTokenUtils.getJwtPayload(lastAssembledToken);
+            
+            // Debug log all claims
+            JwtTokenUtils.debugLogJwtClaims(lastAssembledToken);
+            
+            // Build response
+            result.put("success", true);
+            result.put("userId", userId != null ? userId : "not_found");
+            result.put("email", email != null ? email : "not_found");
+            result.put("isExpired", isExpired);
+            result.put("tokenLength", lastAssembledToken.length());
+            
+            if (payload != null) {
+                result.put("payloadKeys", payload.keys().toString());
+                // Add full payload for debugging
+                result.put("fullPayload", payload.toString());
+            }
+            
+            Log.d(TAG, "✅ JWT extraction test complete:");
+            Log.d(TAG, "   User ID: " + userId);
+            Log.d(TAG, "   Email: " + email);
+            Log.d(TAG, "   Expired: " + isExpired);
+            
+            call.resolve(result);
+            
+        } catch (Exception e) {
+            Log.e(TAG, "❌ JWT extraction test failed: " + e.getMessage(), e);
+            result.put("success", false);
+            result.put("error", e.getMessage());
+            call.resolve(result);
+        }
     }
     
     /**

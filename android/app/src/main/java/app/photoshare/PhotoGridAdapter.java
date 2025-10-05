@@ -21,10 +21,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
-public class PhotoGridAdapter extends RecyclerView.Adapter<PhotoGridAdapter.PhotoViewHolder> {
-    private List<PhotoItem> photos;
+public class PhotoGridAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
+    private List<SectionItem> items;  // Mixed list of section headers and photos
     private Set<Long> selectedPhotoIds;
-    private Set<String> uploadedPhotoIds;
+    private Set<String> uploadedPhotoIds;  // Basic duplicate detection (legacy)
+    private EnhancedDuplicateDetector duplicateDetector;  // Enhanced duplicate detection
     private Context context;
     private OnSelectionChangedListener selectionListener;
     private boolean showPhotoInfo = false;
@@ -35,19 +36,106 @@ public class PhotoGridAdapter extends RecyclerView.Adapter<PhotoGridAdapter.Phot
 
     public PhotoGridAdapter(Context context) {
         this.context = context;
-        this.photos = new ArrayList<>();
+        this.items = new ArrayList<>();
         this.selectedPhotoIds = new HashSet<>();
         this.uploadedPhotoIds = new HashSet<>();
     }
 
+    /**
+     * Set photos and automatically organize into sections: New Photos first, Already Uploaded second
+     * @param photos List of all photos to display
+     */
     public void setPhotos(List<PhotoItem> photos) {
-        this.photos = photos;
+        buildSections(photos);
         notifyDataSetChanged();
+    }
+    
+    /**
+     * Build sections from photos: "New Photos (n)" and "Already Uploaded (x)"
+     * Follows iOS implementation pattern
+     */
+    private void buildSections(List<PhotoItem> photos) {
+        this.items = new ArrayList<>();
+        
+        if (photos == null || photos.isEmpty()) {
+            android.util.Log.d("PhotoGridAdapter", "📋 No photos to organize into sections");
+            return;
+        }
+        
+        // Separate photos into new and uploaded
+        List<PhotoItem> newPhotos = new ArrayList<>();
+        List<PhotoItem> uploadedPhotos = new ArrayList<>();
+        
+        for (PhotoItem photo : photos) {
+            if (isPhotoUploaded(photo)) {
+                uploadedPhotos.add(photo);
+            } else {
+                newPhotos.add(photo);
+            }
+        }
+        
+        android.util.Log.d("PhotoGridAdapter", String.format("📋 Organizing %d photos: %d new, %d uploaded", 
+            photos.size(), newPhotos.size(), uploadedPhotos.size()));
+        
+        // Add "New Photos" section first (iOS style)
+        if (!newPhotos.isEmpty()) {
+            items.add(new SectionItem("New Photos", newPhotos.size()));
+            for (PhotoItem photo : newPhotos) {
+                items.add(new SectionItem(photo));
+            }
+        }
+        
+        // Add "Already Uploaded" section second (iOS style)
+        if (!uploadedPhotos.isEmpty()) {
+            items.add(new SectionItem("Already Uploaded", uploadedPhotos.size()));
+            for (PhotoItem photo : uploadedPhotos) {
+                items.add(new SectionItem(photo));
+            }
+        }
+        
+        android.util.Log.d("PhotoGridAdapter", String.format("📋 Built %d items (%d sections + %d photos)", 
+            items.size(), (newPhotos.isEmpty() ? 0 : 1) + (uploadedPhotos.isEmpty() ? 0 : 1), photos.size()));
     }
 
     public void setUploadedPhotoIds(Set<String> uploadedIds) {
         this.uploadedPhotoIds = uploadedIds != null ? uploadedIds : new HashSet<>();
+        this.duplicateDetector = null;  // Clear enhanced detector when using basic mode
+        rebuildSections();  // Rebuild sections with new duplicate detection
+    }
+    
+    /**
+     * Set enhanced duplicate detector for advanced duplicate detection
+     * @param detector Enhanced duplicate detector instance
+     */
+    public void setEnhancedDuplicateDetector(EnhancedDuplicateDetector detector) {
+        this.duplicateDetector = detector;
+        this.uploadedPhotoIds = new HashSet<>();  // Clear basic IDs when using enhanced mode
+        rebuildSections();  // Rebuild sections with new duplicate detection
+        android.util.Log.d("PhotoGridAdapter", "📸 Enhanced duplicate detection enabled: " + 
+            (detector != null ? detector.getDebugInfo() : "null"));
+    }
+    
+    /**
+     * Rebuild sections from current photos using current duplicate detection method
+     */
+    private void rebuildSections() {
+        List<PhotoItem> currentPhotos = getAllPhotos();
+        buildSections(currentPhotos);
         notifyDataSetChanged();
+    }
+    
+    /**
+     * Extract all PhotoItems from current items list
+     * @return List of all PhotoItems currently displayed
+     */
+    private List<PhotoItem> getAllPhotos() {
+        List<PhotoItem> photos = new ArrayList<>();
+        for (SectionItem item : items) {
+            if (item.isPhoto()) {
+                photos.add(item.getPhotoItem());
+            }
+        }
+        return photos;
     }
 
     public void setOnSelectionChangedListener(OnSelectionChangedListener listener) {
@@ -61,9 +149,12 @@ public class PhotoGridAdapter extends RecyclerView.Adapter<PhotoGridAdapter.Phot
 
     public List<PhotoItem> getSelectedPhotos() {
         List<PhotoItem> selected = new ArrayList<>();
-        for (PhotoItem photo : photos) {
-            if (selectedPhotoIds.contains(photo.getId())) {
-                selected.add(photo);
+        for (SectionItem item : items) {
+            if (item.isPhoto()) {
+                PhotoItem photo = item.getPhotoItem();
+                if (selectedPhotoIds.contains(photo.getId())) {
+                    selected.add(photo);
+                }
             }
         }
         return selected;
@@ -83,22 +174,59 @@ public class PhotoGridAdapter extends RecyclerView.Adapter<PhotoGridAdapter.Phot
 
     @NonNull
     @Override
-    public PhotoViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-        View view = LayoutInflater.from(context).inflate(R.layout.item_photo_grid, parent, false);
-        return new PhotoViewHolder(view);
+    public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+        if (viewType == SectionItem.TYPE_SECTION_HEADER) {
+            View view = LayoutInflater.from(context).inflate(R.layout.item_photo_section_header, parent, false);
+            return new SectionHeaderViewHolder(view);
+        } else {
+            View view = LayoutInflater.from(context).inflate(R.layout.item_photo_grid, parent, false);
+            return new PhotoViewHolder(view);
+        }
     }
 
     @Override
-    public void onBindViewHolder(@NonNull PhotoViewHolder holder, int position) {
-        PhotoItem photo = photos.get(position);
-        holder.bind(photo);
+    public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
+        SectionItem item = items.get(position);
+        
+        if (item.isHeader() && holder instanceof SectionHeaderViewHolder) {
+            ((SectionHeaderViewHolder) holder).bind(item);
+        } else if (item.isPhoto() && holder instanceof PhotoViewHolder) {
+            ((PhotoViewHolder) holder).bind(item.getPhotoItem());
+        }
     }
 
     @Override
     public int getItemCount() {
-        return photos.size();
+        return items.size();
+    }
+    
+    @Override
+    public int getItemViewType(int position) {
+        return items.get(position).getType();
+    }
+    
+    /**
+     * ViewHolder for section headers ("New Photos", "Already Uploaded")
+     */
+    class SectionHeaderViewHolder extends RecyclerView.ViewHolder {
+        private TextView tvSectionTitle;
+        private TextView tvSectionCount;
+        
+        public SectionHeaderViewHolder(@NonNull View itemView) {
+            super(itemView);
+            tvSectionTitle = itemView.findViewById(R.id.tv_section_title);
+            tvSectionCount = itemView.findViewById(R.id.tv_section_count);
+        }
+        
+        public void bind(SectionItem sectionItem) {
+            tvSectionTitle.setText(sectionItem.getSectionTitle());
+            tvSectionCount.setText(String.format("(%d)", sectionItem.getSectionCount()));
+        }
     }
 
+    /**
+     * ViewHolder for individual photos
+     */
     class PhotoViewHolder extends RecyclerView.ViewHolder {
         private ImageView ivPhoto;
         private View selectionOverlay;
@@ -148,8 +276,8 @@ public class PhotoGridAdapter extends RecyclerView.Adapter<PhotoGridAdapter.Phot
             selectionOverlay.setVisibility(isSelected ? View.VISIBLE : View.GONE);
             selectionIndicator.setVisibility(isSelected ? View.VISIBLE : View.GONE);
 
-            // Update upload status with new design
-            boolean isUploaded = uploadedPhotoIds.contains(String.valueOf(photo.getId()));
+            // Update upload status with enhanced or basic duplicate detection
+            boolean isUploaded = isPhotoUploaded(photo);
             
             if (isUploaded) {
                 // Show gradient overlay for uploaded photos
@@ -192,13 +320,17 @@ public class PhotoGridAdapter extends RecyclerView.Adapter<PhotoGridAdapter.Phot
             int position = getAdapterPosition();
             if (position == RecyclerView.NO_POSITION) return;
 
-            PhotoItem photo = photos.get(position);
+            SectionItem item = items.get(position);
+            if (!item.isPhoto()) return;  // Don't allow selection of headers
+            
+            PhotoItem photo = item.getPhotoItem();
             long photoId = photo.getId();
 
-            // Check if photo is already uploaded - prevent selection
-            if (uploadedPhotoIds.contains(String.valueOf(photoId))) {
-                // Show toast to inform user
-                Toast.makeText(context, "Photo already uploaded to this event", Toast.LENGTH_SHORT).show();
+            // Check if photo is already uploaded using enhanced or basic detection
+            if (isPhotoUploaded(photo)) {
+                // Show enhanced toast with duplicate reason
+                String message = getUploadedPhotoMessage(photo);
+                Toast.makeText(context, message, Toast.LENGTH_SHORT).show();
                 return;
             }
 
@@ -218,5 +350,80 @@ public class PhotoGridAdapter extends RecyclerView.Adapter<PhotoGridAdapter.Phot
                 selectionListener.onSelectionChanged(selectedPhotoIds.size());
             }
         }
+    }
+    
+    /**
+     * Check if photo is uploaded using enhanced or basic duplicate detection
+     * @param photo PhotoItem to check
+     * @return true if photo is already uploaded
+     */
+    private boolean isPhotoUploaded(PhotoItem photo) {
+        if (duplicateDetector != null) {
+            // Use enhanced duplicate detection
+            try {
+                // Convert file path to content URI if needed
+                android.net.Uri photoUri;
+                if (photo.getPath() != null && photo.getPath().startsWith("/")) {
+                    // This is a file path, convert to content URI using the PhotoItem's URI
+                    photoUri = photo.getUri();
+                } else {
+                    // Already a URI string, parse it
+                    photoUri = android.net.Uri.parse(photo.getPath());
+                }
+                
+                EnhancedDuplicateDetector.DuplicateResult result = duplicateDetector.checkForDuplicate(photoUri);
+                
+                if (result.isDuplicate()) {
+                    android.util.Log.d("PhotoGridAdapter", String.format(
+                        "🔍 Enhanced duplicate detected: %s (%.1f%% similarity)", 
+                        photo.getDisplayName(), result.getSimilarity() * 100));
+                    return true;
+                }
+                return false;
+            } catch (Exception e) {
+                android.util.Log.w("PhotoGridAdapter", "Enhanced duplicate check failed, falling back to basic: " + e.getMessage());
+                // Fallback to basic detection
+                return uploadedPhotoIds.contains(String.valueOf(photo.getId()));
+            }
+        } else {
+            // Use basic duplicate detection (legacy)
+            return uploadedPhotoIds.contains(String.valueOf(photo.getId()));
+        }
+    }
+    
+    /**
+     * Get appropriate message for uploaded photo based on detection method
+     * @param photo PhotoItem that was detected as uploaded
+     * @return User-friendly message explaining why photo can't be selected
+     */
+    private String getUploadedPhotoMessage(PhotoItem photo) {
+        if (duplicateDetector != null) {
+            try {
+                // Convert file path to content URI if needed
+                android.net.Uri photoUri;
+                if (photo.getPath() != null && photo.getPath().startsWith("/")) {
+                    // This is a file path, convert to content URI using the PhotoItem's URI
+                    photoUri = photo.getUri();
+                } else {
+                    // Already a URI string, parse it
+                    photoUri = android.net.Uri.parse(photo.getPath());
+                }
+                
+                EnhancedDuplicateDetector.DuplicateResult result = duplicateDetector.checkForDuplicate(photoUri);
+                
+                if (result.isDuplicate()) {
+                    if (result.getSimilarity() >= 1.0) {
+                        return "Exact duplicate already uploaded to this event";
+                    } else {
+                        return String.format("Similar photo already uploaded (%.0f%% match)", result.getSimilarity() * 100);
+                    }
+                }
+            } catch (Exception e) {
+                android.util.Log.w("PhotoGridAdapter", "Error getting duplicate message: " + e.getMessage());
+            }
+        }
+        
+        // Fallback message
+        return "Photo already uploaded to this event";
     }
 }

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:paddingStart="16dp"
+    android:paddingEnd="16dp"
+    android:paddingTop="16dp"
+    android:paddingBottom="8dp"
+    android:gravity="center_vertical"
+    android:background="#1F1B2E">
+
+    <!-- Section Title -->
+    <TextView
+        android:id="@+id/tv_section_title"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:text="Section Title"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:textColor="#C084FC" />
+
+    <!-- Section Count -->
+    <TextView
+        android:id="@+id/tv_section_count"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="(0)"
+        android:textSize="14sp"
+        android:textColor="#9CA3AF" />
+
+</LinearLayout>

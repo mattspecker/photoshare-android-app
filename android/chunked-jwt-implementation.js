@@ -17,7 +17,7 @@ console.log('🧩 PhotoShare Chunked JWT Implementation Loaded');
  * @param {number} chunkSize - Size of each chunk (default: 200 chars)
  * @returns {Promise<boolean>} - Success status
  */
-async function sendJwtTokenToAndroidEventPicker(jwtToken, chunkSize = 200) {
+async function sendJwtTokenToAndroidEventPicker(jwtToken, chunkSize = 200, requestId = null) {
     if (!jwtToken || typeof jwtToken !== 'string') {
         console.error('🧩 ❌ Invalid JWT token provided');
         return false;
@@ -40,7 +40,9 @@ async function sendJwtTokenToAndroidEventPicker(jwtToken, chunkSize = 200) {
     }
     
     const totalChunks = chunks.length;
-    const requestId = `jwt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    if (!requestId) {
+        requestId = `jwt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    }
     
     console.log(`🧩 Split token into ${totalChunks} chunks (ID: ${requestId})`);
     
@@ -80,9 +82,10 @@ async function sendJwtTokenToAndroidEventPicker(jwtToken, chunkSize = 200) {
  * Enhanced version of getPhotoShareJwtTokenForAndroid that uses chunked transfer
  * This should replace or augment the existing JWT function
  */
-async function getPhotoShareJwtTokenForAndroidChunked() {
+async function getPhotoShareJwtTokenForAndroidChunked(requestId = null) {
     try {
         console.log('🧩 Getting JWT token with chunked transfer...');
+        console.log('🧩 Using requestId:', requestId);
         
         // First, get the JWT token using existing method
         let jwtToken = null;
@@ -121,7 +124,7 @@ async function getPhotoShareJwtTokenForAndroidChunked() {
         // Send via chunked transfer if token is long
         if (jwtToken.length > 100) {
             console.log('🧩 Token is long, using chunked transfer...');
-            const success = await sendJwtTokenToAndroidEventPicker(jwtToken);
+            const success = await sendJwtTokenToAndroidEventPicker(jwtToken, 200, requestId);
             
             if (success) {
                 console.log('🧩 ✅ Chunked transfer completed successfully');
@@ -144,11 +147,12 @@ async function getPhotoShareJwtTokenForAndroidChunked() {
 /**
  * Silent JWT acquisition for seamless upload flow - no modal
  */
-async function getSilentJwtTokenForAndroid() {
+async function getSilentJwtTokenForAndroid(requestId = null) {
     try {
         console.log('🔇 Getting JWT token silently (no modal)...');
+        console.log('🔇 Received requestId from native:', requestId);
         
-        const result = await getPhotoShareJwtTokenForAndroidChunked();
+        const result = await getPhotoShareJwtTokenForAndroidChunked(requestId);
         
         if (result) {
             console.log('🔇 ✅ Silent JWT acquisition completed successfully');

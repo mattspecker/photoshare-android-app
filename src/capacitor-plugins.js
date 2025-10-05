@@ -1666,3 +1666,221 @@ if (typeof window !== 'undefined') {
   console.log('  • PhotoShareCameraWithEditing.testPhotoEditor() - Test photo editor availability');
   console.log('  • PhotoShareCameraWithEditing.openEventPhotoPickerWithEditing() - Event photos with editing');
 }
+
+// Test PhotoShareAuth functionality - includes JWT extraction test
+window.testPhotoShareAuth = async function() {
+    console.log('🔑 Testing PhotoShareAuth plugin...');
+    
+    try {
+        // Check if plugin is available
+        if (!window.Capacitor?.Plugins?.PhotoShareAuth) {
+            console.error('❌ PhotoShareAuth plugin not available');
+            return;
+        }
+        
+        console.log('✅ PhotoShareAuth plugin is available');
+        
+        // Test auth readiness
+        const readiness = await window.Capacitor.Plugins.PhotoShareAuth.isAuthReady();
+        console.log('🔍 Auth readiness:', readiness);
+        
+        // Get debug info
+        const debugInfo = await window.Capacitor.Plugins.PhotoShareAuth.getDebugInfo();
+        console.log('📊 Debug info:', debugInfo);
+        
+        // Test JWT token retrieval
+        console.log('🔑 Requesting JWT token...');
+        const tokenResult = await window.Capacitor.Plugins.PhotoShareAuth.getJwtToken();
+        console.log('🔑 JWT token result:', tokenResult);
+        
+        if (tokenResult.success) {
+            console.log('✅ JWT token retrieved successfully');
+            console.log('📏 Token length:', tokenResult.length);
+            
+            // Test JWT extraction - NEW METHOD
+            console.log('🧪 Testing JWT token extraction for user ID...');
+            const extractionResult = await window.Capacitor.Plugins.PhotoShareAuth.testJwtExtraction();
+            console.log('🔍 JWT extraction result:', extractionResult);
+            
+            if (extractionResult.success) {
+                console.log('✅ User ID extracted:', extractionResult.userId);
+                console.log('📧 Email extracted:', extractionResult.email);
+                console.log('⏰ Token expired:', extractionResult.isExpired);
+                console.log('🔑 Full payload:', extractionResult.fullPayload);
+                
+                // Return user ID for further testing
+                return {
+                    success: true,
+                    userId: extractionResult.userId,
+                    email: extractionResult.email,
+                    token: tokenResult.token
+                };
+            }
+        }
+        
+        return { success: false };
+        
+    } catch (error) {
+        console.error('❌ PhotoShareAuth test error:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+console.log('📱 PhotoShareAuth test function available: window.testPhotoShareAuth()');
+
+// Multi-Event Auto-Upload Functions
+window.MultiEventAutoUpload = {
+    // Set user context from web app
+    async setUserContext(userId, jwtToken, settings) {
+        console.log('📤 Setting multi-event auto-upload context for user:', userId);
+        
+        if (!window.Capacitor?.Plugins?.MultiEventAutoUpload) {
+            console.error('❌ MultiEventAutoUpload plugin not available');
+            return { success: false, error: 'Plugin not available' };
+        }
+        
+        try {
+            const result = await window.Capacitor.Plugins.MultiEventAutoUpload.setUserContext({
+                userId: userId,
+                jwtToken: jwtToken,
+                autoUploadEnabled: settings?.autoUploadEnabled || false,
+                wifiOnlyUpload: settings?.wifiOnlyUpload || false,
+                backgroundUploadEnabled: settings?.backgroundUploadEnabled || false
+            });
+            
+            console.log('✅ User context set:', result);
+            return result;
+        } catch (error) {
+            console.error('❌ Failed to set user context:', error);
+            return { success: false, error: error.message };
+        }
+    },
+    
+    // Get current user context
+    async getUserContext() {
+        if (!window.Capacitor?.Plugins?.MultiEventAutoUpload) {
+            return null;
+        }
+        
+        try {
+            const result = await window.Capacitor.Plugins.MultiEventAutoUpload.getUserContext();
+            console.log('📊 Current user context:', result);
+            return result;
+        } catch (error) {
+            console.error('❌ Failed to get user context:', error);
+            return null;
+        }
+    },
+    
+    // Get user events for auto-upload
+    async getUserEvents() {
+        console.log('🔍 Getting user events for auto-upload...');
+        
+        if (!window.Capacitor?.Plugins?.MultiEventAutoUpload) {
+            console.error('❌ MultiEventAutoUpload plugin not available');
+            return null;
+        }
+        
+        try {
+            const result = await window.Capacitor.Plugins.MultiEventAutoUpload.getUserEvents();
+            console.log('✅ User events result:', result);
+            
+            if (result.eventsJson) {
+                const events = JSON.parse(result.eventsJson);
+                console.log('📅 Found events:', events);
+                return { ...result, events: events.events };
+            }
+            
+            return result;
+        } catch (error) {
+            console.error('❌ Failed to get user events:', error);
+            return null;
+        }
+    },
+    
+    // Check all events for photos
+    async checkAllEvents() {
+        console.log('🚀 Starting multi-event auto-upload check...');
+        
+        if (!window.Capacitor?.Plugins?.MultiEventAutoUpload) {
+            console.error('❌ MultiEventAutoUpload plugin not available');
+            return null;
+        }
+        
+        try {
+            const result = await window.Capacitor.Plugins.MultiEventAutoUpload.checkAllEventsForPhotos();
+            console.log('✅ Multi-event check result:', result);
+            return result;
+        } catch (error) {
+            console.error('❌ Failed to check events:', error);
+            return null;
+        }
+    }
+};
+
+// Helper function to capture current web context
+window.captureAutoUploadContext = async function() {
+    console.log('📸 Capturing current auto-upload context from web...');
+    
+    try {
+        // Get user ID from various sources
+        let userId = null;
+        
+        // Try to get from Supabase auth
+        if (window.supabase?.auth?.getUser) {
+            const { data: { user } } = await window.supabase.auth.getUser();
+            userId = user?.id;
+        }
+        
+        // Fallback to localStorage
+        if (!userId) {
+            const authData = localStorage.getItem('sb-jgfcfdlfcnmaripgpepl-auth-token');
+            if (authData) {
+                const parsed = JSON.parse(authData);
+                userId = parsed?.user?.id;
+            }
+        }
+        
+        // Get JWT token
+        let jwtToken = null;
+        if (window.getSilentJwtTokenForAndroid) {
+            // This triggers chunked transfer
+            await window.getSilentJwtTokenForAndroid();
+            // Token will be in PhotoShareAuth plugin
+            const authResult = await window.Capacitor?.Plugins?.PhotoShareAuth?.getJwtToken();
+            jwtToken = authResult?.token;
+        }
+        
+        // Get auto-upload settings from localStorage
+        const settingsKey = `auto-upload-settings-${userId}`;
+        const settingsJson = localStorage.getItem(settingsKey);
+        const settings = settingsJson ? JSON.parse(settingsJson) : {
+            autoUploadEnabled: false,
+            wifiOnlyUpload: false,
+            backgroundUploadEnabled: false
+        };
+        
+        console.log('📊 Captured context:');
+        console.log('   User ID:', userId);
+        console.log('   Has JWT:', !!jwtToken);
+        console.log('   Settings:', settings);
+        
+        // Set the context in the plugin
+        if (userId && jwtToken) {
+            await window.MultiEventAutoUpload.setUserContext(userId, jwtToken, settings);
+            return { success: true, userId, settings };
+        } else {
+            console.error('❌ Missing userId or JWT token');
+            return { success: false, error: 'Missing credentials' };
+        }
+        
+    } catch (error) {
+        console.error('❌ Failed to capture context:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+console.log('📱 Multi-Event Auto-Upload functions available:');
+console.log('  • window.captureAutoUploadContext() - Capture current user context');
+console.log('  • window.MultiEventAutoUpload.getUserEvents() - Get user events');
+console.log('  • window.MultiEventAutoUpload.checkAllEvents() - Check all events');

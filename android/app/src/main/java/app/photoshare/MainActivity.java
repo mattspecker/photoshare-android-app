@@ -12,6 +12,7 @@ import android.view.Gravity;
 import android.graphics.Color;
 import android.app.AlertDialog;
 import android.webkit.JavascriptInterface;
+import android.webkit.WebSettings;
 import android.content.Context;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.Plugin;
@@ -19,13 +20,18 @@ import app.photoshare.EventPhotoPickerPlugin;
 import app.photoshare.AppPermissionsPlugin;
 import app.photoshare.CameraPreviewReplacementPlugin;
 import app.photoshare.EnhancedCameraPlugin;
+import app.photoshare.AutoUploadPlugin;
 import java.util.ArrayList;
 
 public class MainActivity extends BridgeActivity {
     private static final String TAG = "MainActivity";
+    private static MainActivity instance;
     
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        // Set static instance for WebView access from other activities
+        instance = this;
+        
         // Get current timestamp for build version tracking
         String buildTimestamp = String.valueOf(System.currentTimeMillis());
         Log.d("MainActivity", "🚀 APP LAUNCH - version = " + buildTimestamp);
@@ -34,6 +40,10 @@ public class MainActivity extends BridgeActivity {
         
         // CRITICAL: Register custom plugins BEFORE super.onCreate() (Capacitor 7.4.3 requirement)
         Log.d("MainActivity", "Registering custom plugins BEFORE super.onCreate()...");
+        
+        // Register PhotoShareAuth plugin for centralized JWT token management
+        registerPlugin(PhotoShareAuthPlugin.class);
+        Log.d("MainActivity", "✅ PhotoShareAuthPlugin registered successfully");
         
         // Register EventPhotoPicker plugin
         registerPlugin(EventPhotoPickerPlugin.class);
@@ -46,6 +56,14 @@ public class MainActivity extends BridgeActivity {
         // Register EnhancedCamera plugin for camera + photo editor integration
         registerPlugin(EnhancedCameraPlugin.class);
         Log.d("MainActivity", "✅ EnhancedCameraPlugin registered successfully");
+        
+        // Register AutoUpload plugin for multi-event photo upload
+        registerPlugin(AutoUploadPlugin.class);
+        Log.d("MainActivity", "✅ AutoUploadPlugin registered successfully");
+        
+        // Register MultiEventAutoUpload plugin for app resume checking
+        registerPlugin(MultiEventAutoUploadPlugin.class);
+        Log.d("MainActivity", "✅ MultiEventAutoUploadPlugin registered successfully");
         
         // Register PhotoEditor plugin for photo editing capabilities
         try {
@@ -60,6 +78,7 @@ public class MainActivity extends BridgeActivity {
         }
         
         // Register CameraPreviewReplacement plugin as "Camera" to intercept native calls
+        registerPlugin(CameraPreviewReplacementPlugin.class);
         Log.d("MainActivity", "✅ CameraPreviewReplacementPlugin registered as 'Camera' plugin");
         
         // Note: NPM plugins (BarcodeScanner, PushNotifications, etc.) are auto-registered by Capacitor
@@ -73,6 +92,13 @@ public class MainActivity extends BridgeActivity {
         
         Log.d("MainActivity", "=== CAPACITOR INITIALIZATION COMPLETE ===");
         
+        // CRITICAL: Configure WebView settings for Supabase WebSocket connections
+        // Must be AFTER super.onCreate() when WebView exists
+        configureWebViewForSupabase();
+        
+        // Verify all plugins are properly loaded
+        verifyPluginRegistration();
+        
         // Initialize safe area handling
         initializeSafeArea();
         
@@ -80,9 +106,78 @@ public class MainActivity extends BridgeActivity {
         setupJwtTokenMonitoring();
     }
     
+    private void verifyPluginRegistration() {
+        Log.d("MainActivity", "🔍 === PLUGIN VERIFICATION STARTING ===");
+        
+        // Test JavaScript plugin availability after a short delay
+        new Handler().postDelayed(() -> {
+            bridge.getWebView().evaluateJavascript(
+                "(function() {" +
+                "  console.log('🔍 Plugin verification from native side...');" +
+                "  " +
+                "  var results = {" +
+                "    capacitorAvailable: typeof window.Capacitor !== 'undefined'," +
+                "    pluginsObject: typeof window.Capacitor?.Plugins !== 'undefined'," +
+                "    customPlugins: {}," +
+                "    npmPlugins: {}," +
+                "    issues: []" +
+                "  };" +
+                "  " +
+                "  if (!results.capacitorAvailable) {" +
+                "    results.issues.push('Capacitor not available');" +
+                "    return JSON.stringify(results);" +
+                "  }" +
+                "  " +
+                "  // Test custom plugins" +
+                "  var customPlugins = ['EventPhotoPicker', 'AppPermissions', 'EnhancedCamera', 'AutoUpload', 'CameraPreviewReplacement'];" +
+                "  for (var i = 0; i < customPlugins.length; i++) {" +
+                "    var pluginName = customPlugins[i];" +
+                "    var available = window.Capacitor.isPluginAvailable(pluginName);" +
+                "    var hasObject = !!window.Capacitor.Plugins[pluginName];" +
+                "    results.customPlugins[pluginName] = { available: available, hasObject: hasObject };" +
+                "    if (!available) results.issues.push('Custom plugin ' + pluginName + ' not available');" +
+                "  }" +
+                "  " +
+                "  // Test NPM plugins" +
+                "  var npmPlugins = ['Camera', 'Device', 'BarcodeScanner', 'PushNotifications', 'StatusBar', 'PhotoEditor'];" +
+                "  for (var i = 0; i < npmPlugins.length; i++) {" +
+                "    var pluginName = npmPlugins[i];" +
+                "    var available = window.Capacitor.isPluginAvailable(pluginName);" +
+                "    var hasObject = !!window.Capacitor.Plugins[pluginName];" +
+                "    results.npmPlugins[pluginName] = { available: available, hasObject: hasObject };" +
+                "    if (!available) results.issues.push('NPM plugin ' + pluginName + ' not available');" +
+                "  }" +
+                "  " +
+                "  console.log('🔍 Plugin verification results:', results);" +
+                "  return JSON.stringify(results);" +
+                "})()",
+                result -> {
+                    Log.d("MainActivity", "🔍 === PLUGIN VERIFICATION COMPLETE ===");
+                    Log.d("MainActivity", "🔍 Plugin verification result: " + result);
+                    
+                    try {
+                        // Parse and log readable results
+                        if (result != null && !result.equals("null")) {
+                            Log.d("MainActivity", "✅ Plugin verification completed - see console for details");
+                        } else {
+                            Log.w("MainActivity", "⚠️ Plugin verification returned null result");
+                        }
+                    } catch (Exception e) {
+                        Log.e("MainActivity", "❌ Error processing plugin verification result", e);
+                    }
+                }
+            );
+        }, 1000); // Wait 1 second for plugins to fully load
+    }
+    
     private void initializeSafeArea() {
         // Get the bridge WebView
         WebView webView = bridge.getWebView();
+        
+        // Initialize centralized JWT token manager
+        JwtTokenManager jwtTokenManager = JwtTokenManager.getInstance(this);
+        jwtTokenManager.initializeJavaScriptInterface(webView);
+        Log.d("MainActivity", "✅ JwtTokenManager JavaScript interface initialized");
         
         // Inject JavaScript to handle safe area insets and barcode scanner CSS
         String safeAreaScript = 
@@ -140,6 +235,10 @@ public class MainActivity extends BridgeActivity {
             "      console.log('❌ Capacitor.registerPlugin not available');" +
             "      return false;" +
             "    }" +
+            "    " +
+            "    // Register PhotoShareAuth plugin" +
+            "    console.log('🔑 Registering PhotoShareAuth plugin...');" +
+            "    const PhotoShareAuth = window.Capacitor.registerPlugin('PhotoShareAuth');" +
             "    " +
             "    // Register EventPhotoPicker plugin" +
             "    console.log('📱 Registering EventPhotoPicker plugin...');" +
@@ -410,6 +509,9 @@ public class MainActivity extends BridgeActivity {
         
         webView.evaluateJavascript(cameraMonitoringScript, null);
         
+        // Setup auto-upload monitoring with real event data
+        setupAutoUploadMonitoring();
+        
         // Also monitor CameraPreview plugin availability
         String cameraPreviewMonitorScript =
             "console.log('📹 CAMERA PREVIEW MONITOR: Checking CameraPreview plugin...'); " +
@@ -520,9 +622,10 @@ public class MainActivity extends BridgeActivity {
         
         // Execute scripts with immediate plugin setup
         webView.post(() -> {
-            // First log the build version to console
+            // First log the build version to console (escape special characters)
+            String timestamp = String.valueOf(System.currentTimeMillis());
             String consoleVersionScript = 
-                "console.log('🚀 APP LAUNCH - version = " + java.time.LocalDateTime.now().toString() + "');";
+                "console.log('🚀 APP LAUNCH - version = " + timestamp + "');";
             webView.evaluateJavascript(consoleVersionScript, null);
             
             // IMMEDIATELY create CapacitorApp bridge
@@ -587,11 +690,17 @@ public class MainActivity extends BridgeActivity {
     }
     
     private void setupJwtTokenMonitoring() {
-        Log.d("MainActivity", "🔥 Setting up automatic JWT token monitoring");
+        Log.d("MainActivity", "🔥 Setting up auth bridge first, then JWT token monitoring");
         
         WebView webView = bridge.getWebView();
         
-        // Monitor for page loads and auth state changes
+        // STEP 1: Add web team's diagnostic test script 
+        addWebTeamDiagnosticScript(webView);
+        
+        // STEP 2: Initialize auth bridge checker (web team confirmed objects should exist)
+        initializeAuthBridgeEarly(webView);
+        
+        // STEP 2: Wait briefly for auth bridge, then start JWT monitoring
         webView.post(() -> {
             String monitoringScript = 
                 "console.log('🔥 JWT Token Monitoring initialized');" +
@@ -689,6 +798,87 @@ public class MainActivity extends BridgeActivity {
         setupAndroidJwtBridge();
         
         Log.d("MainActivity", "✅ JWT Token monitoring setup complete");
+    }
+    
+    private void setupAutoUploadMonitoring() {
+        Log.d("MainActivity", "🔥 Setting up automatic multi-event auto-upload monitoring");
+        
+        // Use getBridge() and check if it's available
+        if (getBridge() == null) {
+            Log.e("MainActivity", "❌ Bridge not available for auto-upload setup");
+            return;
+        }
+        
+        WebView webView = getBridge().getWebView();
+        if (webView == null) {
+            Log.e("MainActivity", "❌ WebView not available for auto-upload setup");
+            return;
+        }
+        
+        Log.d("MainActivity", "✅ Bridge and WebView available, setting up auto-upload");
+        
+        // Wait for app to load, then trigger auto-upload check periodically
+        webView.postDelayed(() -> {
+            Log.d("MainActivity", "🔥 Executing auto-upload setup script after delay");
+            String autoUploadScript = 
+                "console.log('🔥 Auto-upload monitoring initialized');" +
+                "" +
+                "// Function to trigger auto-upload check" +
+                "function triggerAutoUploadCheck() {" +
+                "  try {" +
+                "    console.log('🚀 Triggering auto-upload check...');" +
+                "    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AutoUpload) {" +
+                "      window.Capacitor.Plugins.AutoUpload.checkAndUploadPhotos().then(function(result) {" +
+                "        console.log('✅ Auto-upload completed:', result);" +
+                "        if (result.photosUploaded > 0) {" +
+                "          console.log('📤 Successfully uploaded ' + result.photosUploaded + ' photos');" +
+                "        }" +
+                "      }).catch(function(error) {" +
+                "        console.error('❌ Auto-upload failed:', error);" +
+                "      });" +
+                "    } else {" +
+                "      console.log('⚠️ AutoUpload plugin not found');" +
+                "    }" +
+                "  } catch (e) {" +
+                "    console.error('❌ Auto-upload trigger error:', e);" +
+                "  }" +
+                "}" +
+                "" +
+                "// Initial auto-upload check after app loads (10 seconds)" +
+                "setTimeout(function() {" +
+                "  console.log('🔥 Running initial auto-upload check after app load');" +
+                "  triggerAutoUploadCheck();" +
+                "}, 10000);" +
+                "" +
+                "// Periodic auto-upload checks every 5 minutes" +
+                "setInterval(function() {" +
+                "  console.log('🔄 Running periodic auto-upload check');" +
+                "  triggerAutoUploadCheck();" +
+                "}, 300000);" + // 5 minutes
+                "" +
+                "// Make function globally available for testing" +
+                "window.testAutoUpload = triggerAutoUploadCheck;" +
+                "" +
+                "// Monitor URL changes to trigger auto-upload on event page visits" +
+                "let lastUrl = window.location.href;" +
+                "setInterval(function() {" +
+                "  if (window.location.href !== lastUrl) {" +
+                "    lastUrl = window.location.href;" +
+                "    if (lastUrl.includes('/event/')) {" +
+                "      console.log('🔥 Event page detected, triggering auto-upload in 3 seconds');" +
+                "      setTimeout(triggerAutoUploadCheck, 3000);" +
+                "    }" +
+                "  }" +
+                "}, 2000);" + // Check every 2 seconds
+                "" +
+                "console.log('✅ Auto-upload monitoring active with URL change detection');";
+            
+            webView.evaluateJavascript(autoUploadScript, (result) -> {
+                Log.d("MainActivity", "✅ Auto-upload setup script executed with result: " + result);
+            });
+        }, 3000); // Wait 3 seconds for web app to load
+        
+        Log.d("MainActivity", "✅ Auto-upload monitoring setup complete");
         
         // Final plugin availability check after all initialization
         getBridge().getWebView().post(() -> {
@@ -1024,10 +1214,384 @@ public class MainActivity extends BridgeActivity {
     // CORE JWT EXTRACTION METHODS: Used by automatic monitoring
     // These methods don't show dialogs, they just extract and store tokens
     
+    /**
+     * Initialize auth bridge early for duplicate detection following web team specifications
+     * CRITICAL TIMING: Wait 3-5 seconds after page load for auth bridge readiness
+     */
+    private void initializeAuthBridgeEarly(WebView webView) {
+        Log.d("MainActivity", "🔍 Initializing auth bridge early for duplicate detection (following web team specs)");
+        
+        webView.post(() -> {
+            String authBridgeInitScript = 
+                "console.log('🔍 Early Auth Bridge Initialization - Following Web Team Timing Requirements');" +
+                "" +
+                "// Create the bridge objects that EnhancedDuplicateDetector expects" +
+                "console.log('🔍 Setting up expected bridge objects for duplicate detection...');" +
+                "" +
+                "// Set up auth bridge readiness checker function" +
+                "window.checkAuthBridgeForAndroid = async function() {" +
+                "  try {" +
+                "    console.log('🤖 Android: Checking auth bridge readiness...');" +
+                "    " +
+                "    // STEP 1: Wait for auth bridge to be ready (3-5 seconds typical)" +
+                "    console.log('🤖 Step 1: Waiting for auth bridge...');" +
+                "    " +
+                "    // Use the recommended waitForPhotoshareReady function with 10s timeout" +
+                "    if (window.waitForPhotoshareReady) {" +
+                "      try {" +
+                "        const authReady = await window.waitForPhotoshareReady('authBridge');" +
+                "        if (!authReady) {" +
+                "          console.error('❌ Auth bridge not ready after 10 seconds');" +
+                "          return { success: false, error: 'Auth bridge timeout' };" +
+                "        }" +
+                "        console.log('✅ Auth bridge ready via waitForPhotoshareReady');" +
+                "      } catch (err) {" +
+                "        console.error('❌ Auth bridge timeout:', err);" +
+                "        return { success: false, error: 'Auth bridge timeout: ' + err.message };" +
+                "      }" +
+                "    } else {" +
+                "      // Fallback polling if waitForPhotoshareReady not available" +
+                "      console.log('🤖 Fallback: Using polling for auth bridge...');" +
+                "      let attempts = 0;" +
+                "      const maxAttempts = 50; // 10 seconds at 200ms intervals" +
+                "      " +
+                "      while (attempts < maxAttempts) {" +
+                "        if (window.PhotoShareAuthBridge && window.PhotoShareAuthBridge.isReady && window.PhotoShareAuthBridge.isReady()) {" +
+                "          console.log('✅ Auth bridge ready via polling after ' + (attempts * 200) + 'ms');" +
+                "          break;" +
+                "        }" +
+                "        await new Promise(resolve => setTimeout(resolve, 200));" +
+                "        attempts++;" +
+                "      }" +
+                "      " +
+                "      if (attempts >= maxAttempts) {" +
+                "        console.error('❌ Auth bridge polling timeout after 10 seconds');" +
+                "        return { success: false, error: 'Auth bridge polling timeout' };" +
+                "      }" +
+                "    }" +
+                "    " +
+                "    // STEP 2: Refresh JWT token to ensure it's fresh (ALWAYS REQUIRED)" +
+                "    console.log('🤖 Step 2: Refreshing JWT token...');" +
+                "    if (window.NativeWebViewJWT && window.NativeWebViewJWT.refreshToken) {" +
+                "      try {" +
+                "        await window.NativeWebViewJWT.refreshToken();" +
+                "        console.log('✅ JWT token refreshed');" +
+                "      } catch (refreshErr) {" +
+                "        console.warn('⚠️ JWT refresh failed, proceeding anyway:', refreshErr);" +
+                "      }" +
+                "    } else {" +
+                "      console.warn('⚠️ NativeWebViewJWT not available, skipping refresh');" +
+                "    }" +
+                "    " +
+                "    // STEP 3: Verify required functions are available" +
+                "    console.log('🤖 Step 3: Verifying required functions...');" +
+                "    const hasPhotoIdentifiers = typeof window.getPhotoIdentifiersForExclusion === 'function';" +
+                "    const hasGetJwtToken = typeof window.getJwtTokenForNativePlugin === 'function';" +
+                "    " +
+                "    console.log('🤖 Required functions check:');" +
+                "    console.log('  - getPhotoIdentifiersForExclusion:', hasPhotoIdentifiers);" +
+                "    console.log('  - getJwtTokenForNativePlugin:', hasGetJwtToken);" +
+                "    " +
+                "    if (!hasPhotoIdentifiers) {" +
+                "      return { success: false, error: 'getPhotoIdentifiersForExclusion not available' };" +
+                "    }" +
+                "    " +
+                "    // Mark as ready for duplicate detection" +
+                "    window.photoshareAuthBridgeReadyForDuplicateDetection = true;" +
+                "    " +
+                "    // Fire ready event" +
+                "    window.dispatchEvent(new CustomEvent('photoshare-auth-bridge-ready-for-duplicate-detection', {" +
+                "      detail: { " +
+                "        timestamp: Date.now(), " +
+                "        hasPhotoIdentifiers: hasPhotoIdentifiers, " +
+                "        hasGetJwtToken: hasGetJwtToken " +
+                "      }" +
+                "    }));" +
+                "    " +
+                "    console.log('✅ Auth bridge fully ready for duplicate detection!');" +
+                "    return { success: true, ready: true };" +
+                "    " +
+                "  } catch (error) {" +
+                "    console.error('❌ Auth bridge check error:', error);" +
+                "    return { success: false, error: error.message || error.toString() };" +
+                "  }" +
+                "};" +
+                "" +
+                "// Schedule auth bridge check after minimum safe delay (3 seconds per web team)" +
+                "console.log('🔍 Scheduling auth bridge check in 3 seconds (minimum safe delay)...');" +
+                "setTimeout(() => {" +
+                "  console.log('🔍 Starting scheduled auth bridge check...');" +
+                "  window.checkAuthBridgeForAndroid().then(result => {" +
+                "    console.log('🔍 Auth bridge check result:', result);" +
+                "  }).catch(error => {" +
+                "    console.error('🔍 Auth bridge check failed:', error);" +
+                "  });" +
+                "}, 3000);" +
+                "" +
+                "// Also retry on DOMContentLoaded with proper delay" +
+                "document.addEventListener('DOMContentLoaded', () => {" +
+                "  console.log('🔍 DOMContentLoaded - scheduling auth bridge check in 2s...');" +
+                "  setTimeout(() => {" +
+                "    window.checkAuthBridgeForAndroid();" +
+                "  }, 2000);" +
+                "});" +
+                "" +
+                "// Final retry on window load with proper delay" +
+                "window.addEventListener('load', () => {" +
+                "  console.log('🔍 Window load - scheduling final auth bridge check in 3s...');" +
+                "  setTimeout(() => {" +
+                "    window.checkAuthBridgeForAndroid();" +
+                "  }, 3000);" +
+                "});";
+            
+            webView.evaluateJavascript(authBridgeInitScript, result -> {
+                Log.d("MainActivity", "🔍 Auth bridge initialization script executed following web team timing");
+            });
+        });
+    }
     
+    /**
+     * Add web team's comprehensive diagnostic test script
+     * This verifies all auth bridge objects are available as expected
+     */
+    private void addWebTeamDiagnosticScript(WebView webView) {
+        Log.d("MainActivity", "🔍 Adding web team's auth bridge diagnostic test");
+        
+        webView.post(() -> {
+            String diagnosticScript = 
+                "// Complete Auth Bridge Diagnostic Test from Web Team" +
+                "window.testAuthBridge = async function() {" +
+                "  console.log('🔍 AUTH BRIDGE DIAGNOSTIC TEST\\n');" +
+                "  " +
+                "  // 1. Check object availability" +
+                "  console.log('📦 OBJECT AVAILABILITY:');" +
+                "  const objects = {" +
+                "    Capacitor: !!window.Capacitor," +
+                "    supabase: !!window.supabase," +
+                "    PhotoShareAuthBridge: !!window.PhotoShareAuthBridge," +
+                "    PhotoShareAuthState: !!window.PhotoShareAuthState," +
+                "    PhotoShareLoadingState: !!window.PhotoShareLoadingState," +
+                "    NativeWebViewJWT: !!window.NativeWebViewJWT," +
+                "    getJwtTokenForNativePlugin: !!window.getJwtTokenForNativePlugin," +
+                "    waitForPhotoshareReady: !!window.waitForPhotoshareReady," +
+                "    getPhotoIdentifiersForExclusion: !!window.getPhotoIdentifiersForExclusion" +
+                "  };" +
+                "  console.table(objects);" +
+                "  " +
+                "  // 2. Check auth bridge ready state" +
+                "  console.log('\\n🔐 AUTH BRIDGE STATUS:');" +
+                "  if (window.PhotoShareAuthBridge) {" +
+                "    const isReady = window.PhotoShareAuthBridge.isReady();" +
+                "    console.log('  isReady():', isReady);" +
+                "    console.log('  authState:', window.PhotoShareAuthBridge.getAuthState());" +
+                "  }" +
+                "  " +
+                "  // 3. Check loading state" +
+                "  console.log('\\n⏳ LOADING STATE:');" +
+                "  if (window.PhotoShareLoadingState) {" +
+                "    console.log('  capacitorReady:', window.PhotoShareLoadingState.capacitorReady);" +
+                "    console.log('  supabaseReady:', window.PhotoShareLoadingState.supabaseReady);" +
+                "    console.log('  authBridgeReady:', window.PhotoShareLoadingState.authBridgeReady);" +
+                "  }" +
+                "  " +
+                "  // 4. Test JWT token retrieval" +
+                "  console.log('\\n🔑 JWT TOKEN TEST:');" +
+                "  try {" +
+                "    const token = await window.getJwtTokenForNativePlugin();" +
+                "    console.log('  Token retrieved:', token ? '✅ YES' : '❌ NO');" +
+                "    if (token) {" +
+                "      console.log('  Token length:', token.length);" +
+                "      console.log('  Token preview:', token.substring(0, 30) + '...');" +
+                "    }" +
+                "  } catch (error) {" +
+                "    console.error('  ❌ Token error:', error.message);" +
+                "  }" +
+                "  " +
+                "  // 5. Test NativeWebViewJWT" +
+                "  console.log('\\n📱 NATIVE JWT WRAPPER:');" +
+                "  if (window.NativeWebViewJWT) {" +
+                "    console.log('  Status:', window.NativeWebViewJWT.getStatus());" +
+                "    console.log('  Has valid token:', window.NativeWebViewJWT.hasValidToken());" +
+                "  }" +
+                "  " +
+                "  // 6. Test duplicate prevention" +
+                "  console.log('\\n📸 DUPLICATE PREVENTION:');" +
+                "  console.log('  getPhotoIdentifiersForExclusion:', typeof window.getPhotoIdentifiersForExclusion);" +
+                "  " +
+                "  console.log('\\n✅ Test complete!');" +
+                "  return objects;" +
+                "};" +
+                "" +
+                "// Auto-run diagnostic test after 5 seconds (after auth bridge should be ready)" +
+                "setTimeout(() => {" +
+                "  console.log('🔍 Auto-running auth bridge diagnostic test...');" +
+                "  window.testAuthBridge().then(result => {" +
+                "    console.log('🔍 Diagnostic complete - see results above');" +
+                "  }).catch(error => {" +
+                "    console.error('🔍 Diagnostic test failed:', error);" +
+                "  });" +
+                "}, 5000);" +
+                "" +
+                "// CRITICAL: Check what's actually loading on the page" +
+                "setTimeout(() => {" +
+                "  console.log('🔍 CRITICAL DEBUGGING - What scripts are loaded?');" +
+                "  const scripts = Array.from(document.querySelectorAll('script')).map(s => s.src || 'inline');" +
+                "  console.log('📜 Loaded scripts:', scripts);" +
+                "  " +
+                "  console.log('🔍 Auth bridge files check:');" +
+                "  console.log('  - ios-jwt-auth-bridge.js loaded?', scripts.some(s => s.includes('ios-jwt-auth-bridge')));" +
+                "  console.log('  - loading-coordinator.js loaded?', scripts.some(s => s.includes('loading-coordinator')));" +
+                "  console.log('  - native-webview-jwt-wrapper.js loaded?', scripts.some(s => s.includes('native-webview-jwt-wrapper')));" +
+                "  console.log('  - photo-duplicate-prevention.js loaded?', scripts.some(s => s.includes('photo-duplicate-prevention')));" +
+                "  console.log('  - photoshare-app-integration-inline.js loaded?', scripts.some(s => s.includes('photoshare-app-integration-inline')));" +
+                "  " +
+                "  // Check if any auth bridge scripts failed to load" +
+                "  const failedScripts = Array.from(document.querySelectorAll('script')).filter(s => s.error || s.onerror);" +
+                "  if (failedScripts.length > 0) {" +
+                "    console.error('❌ Failed to load scripts:', failedScripts.map(s => s.src));" +
+                "  }" +
+                "  " +
+                "  console.log('🔍 Raw window object keys containing auth/jwt/photo:');" +
+                "  const relevantKeys = Object.keys(window).filter(k => " +
+                "    k.toLowerCase().includes('auth') || " +
+                "    k.toLowerCase().includes('jwt') || " +
+                "    k.toLowerCase().includes('photo') ||" +
+                "    k.toLowerCase().includes('supabase') ||" +
+                "    k.toLowerCase().includes('loading')" +
+                "  );" +
+                "  console.log('🔑 Relevant keys:', relevantKeys);" +
+                "  " +
+                "  console.log('🔍 User authentication check:');" +
+                "  if (window.supabase && window.supabase.auth) {" +
+                "    window.supabase.auth.getUser().then(({ data: user, error }) => {" +
+                "      console.log('👤 User auth status:', user ? 'LOGGED IN' : 'NOT LOGGED IN');" +
+                "      console.log('👤 User error:', error);" +
+                "      if (user && user.user) {" +
+                "        console.log('👤 User ID:', user.user.id);" +
+                "        console.log('👤 User email:', user.user.email);" +
+                "      }" +
+                "    }).catch(err => {" +
+                "      console.error('👤 Error checking user auth:', err);" +
+                "    });" +
+                "  } else {" +
+                "    console.log('👤 Supabase auth not available');" +
+                "  }" +
+                "}, 2000);" +
+                "" +
+                "// AGGRESSIVE AUTH BRIDGE MONITORING - Check every second for 15 seconds" +
+                "let monitoringInterval = 0;" +
+                "const authBridgeMonitor = setInterval(() => {" +
+                "  monitoringInterval++;" +
+                "  console.log(`🔍 AUTH BRIDGE MONITOR [${monitoringInterval}s]:`);" +
+                "  console.log('  PhotoShareAuthBridge exists:', !!window.PhotoShareAuthBridge);" +
+                "  console.log('  PhotoShareAuthBridge.isReady:', window.PhotoShareAuthBridge?.isReady?.());" +
+                "  console.log('  PhotoShareLoadingState exists:', !!window.PhotoShareLoadingState);" +
+                "  console.log('  PhotoShareLoadingState.authBridgeReady:', window.PhotoShareLoadingState?.authBridgeReady);" +
+                "  console.log('  waitForPhotoshareReady exists:', !!window.waitForPhotoshareReady);" +
+                "  console.log('  NativeWebViewJWT exists:', !!window.NativeWebViewJWT);" +
+                "  console.log('  getPhotoIdentifiersForExclusion exists:', !!window.getPhotoIdentifiersForExclusion);" +
+                "  " +
+                "  // Try to see if there are any errors in the loading coordinator" +
+                "  if (window.PhotoShareLoadingState) {" +
+                "    console.log('  LoadingState details:', window.PhotoShareLoadingState);" +
+                "  }" +
+                "  " +
+                "  // Stop monitoring after 15 seconds" +
+                "  if (monitoringInterval >= 15) {" +
+                "    clearInterval(authBridgeMonitor);" +
+                "    console.log('🔍 AUTH BRIDGE MONITORING STOPPED - 15 seconds elapsed');" +
+                "    " +
+                "    // Final diagnosis" +
+                "    if (!window.PhotoShareAuthBridge) {" +
+                "      console.error('❌ FINAL DIAGNOSIS: PhotoShareAuthBridge never created');" +
+                "      console.error('❌ This suggests the auth bridge script failed to load or execute');" +
+                "    } else if (!window.PhotoShareAuthBridge.isReady()) {" +
+                "      console.error('❌ FINAL DIAGNOSIS: PhotoShareAuthBridge exists but isReady() = false');" +
+                "      console.error('❌ This suggests auth bridge initialization failed');" +
+                "    }" +
+                "  }" +
+                "}, 1000);" +
+                "" +
+                "console.log('🔍 Web team diagnostic test loaded - will auto-run in 5 seconds');" +
+                "console.log('🔍 Auth bridge monitoring started - checking every second for 15 seconds');";
+            
+            webView.evaluateJavascript(diagnosticScript, result -> {
+                Log.d("MainActivity", "🔍 Web team diagnostic test script loaded");
+            });
+        });
+    }
+    
+    /**
+     * Configure WebView settings for Supabase WebSocket connections
+     * CRITICAL: Must be called AFTER super.onCreate() when WebView exists
+     */
+    private void configureWebViewForSupabase() {
+        Log.d("MainActivity", "🔧 Configuring WebView for Supabase WebSocket connections");
+        
+        try {
+            // Get the Capacitor bridge WebView
+            WebView webView = bridge.getWebView();
+            if (webView == null) {
+                Log.e("MainActivity", "❌ WebView not available for Supabase configuration");
+                return;
+            }
+            
+            // Configure WebView settings for WebSocket connections
+            WebSettings settings = webView.getSettings();
+            
+            // JavaScript should already be enabled, but ensure it's true
+            settings.setJavaScriptEnabled(true);
+            
+            // Critical for Supabase WebSocket connections
+            settings.setDomStorageEnabled(true);
+            settings.setDatabaseEnabled(true);
+            
+            // Allow mixed content for development (HTTP content in HTTPS context)
+            settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+            
+            // Set user agent to ensure compatibility
+            String userAgent = settings.getUserAgentString();
+            if (!userAgent.contains("PhotoShare")) {
+                settings.setUserAgentString(userAgent + " PhotoShare/Android");
+            }
+            
+            // Allow file access for local resources
+            settings.setAllowFileAccess(true);
+            settings.setAllowContentAccess(true);
+            
+            // Disable geolocation unless specifically needed
+            settings.setGeolocationEnabled(false);
+            
+            // Enable hardware acceleration for better performance
+            webView.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null);
+            
+            Log.d("MainActivity", "✅ WebView configured for Supabase WebSocket connections");
+            Log.d("MainActivity", "   - JavaScript enabled: " + settings.getJavaScriptEnabled());
+            Log.d("MainActivity", "   - DOM storage enabled: " + settings.getDomStorageEnabled());
+            Log.d("MainActivity", "   - Database enabled: " + settings.getDatabaseEnabled());
+            Log.d("MainActivity", "   - Mixed content mode: " + settings.getMixedContentMode());
+            Log.d("MainActivity", "   - User agent: " + settings.getUserAgentString());
+            
+        } catch (Exception e) {
+            Log.e("MainActivity", "❌ Error configuring WebView for Supabase: " + e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Get the static WebView instance for use by other activities (like EventPhotoPickerActivity)
+     * @return WebView instance from Capacitor bridge, or null if not available
+     */
+    public static WebView getStaticWebView() {
+        if (instance != null && instance.bridge != null) {
+            return instance.bridge.getWebView();
+        }
+        return null;
+    }
     
     @Override
     public void onDestroy() {
         super.onDestroy();
+        // Clear static instance to prevent memory leaks
+        instance = null;
     }
 }
