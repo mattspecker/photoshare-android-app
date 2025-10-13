@@ -35,6 +35,18 @@
             android:theme="@style/AppTheme.NoActionBar"
             android:exported="false" />
 
+        <activity
+            android:name=".ImageViewerActivity"
+            android:theme="@style/AppTheme.NoActionBar"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize"
+            android:exported="false" />
+
+        <activity
+            android:name=".BulkDownloadActivity"
+            android:theme="@style/AppTheme.NoActionBar"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize"
+            android:exported="false" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

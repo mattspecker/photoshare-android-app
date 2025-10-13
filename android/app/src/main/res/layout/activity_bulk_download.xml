@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/white">
+
+    <!-- Photo Grid -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/photo_grid"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_above="@+id/selection_controls"
+        android:padding="8dp"
+        android:clipToPadding="false"
+        android:scrollbars="vertical" />
+
+    <!-- Selection Controls Bar -->
+    <LinearLayout
+        android:id="@+id/selection_controls"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:orientation="vertical"
+        android:background="@color/selection_bar_background"
+        android:elevation="8dp"
+        android:visibility="gone">
+
+        <!-- Top shadow line -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/selection_bar_shadow" />
+
+        <!-- Controls content -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:padding="16dp"
+            android:gravity="center_vertical">
+
+            <!-- Selection count text -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/selection_count"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="23 photos selected"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:textColor="@android:color/black" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Tap photos to select or deselect"
+                    android:textSize="12sp"
+                    android:textColor="@color/clear_button_text"
+                    android:layout_marginTop="2dp" />
+
+            </LinearLayout>
+
+            <!-- Clear button -->
+            <Button
+                android:id="@+id/btn_clear"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:text="Clear"
+                android:textSize="14sp"
+                android:textColor="@color/clear_button_text"
+                android:background="@android:color/transparent"
+                android:paddingLeft="12dp"
+                android:paddingRight="12dp"
+                android:layout_marginEnd="8dp" />
+
+            <!-- Download button -->
+            <Button
+                android:id="@+id/btn_download"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:text="Download Selected"
+                android:textSize="14sp"
+                android:textColor="@color/download_button_text"
+                android:background="@drawable/button_download_background"
+                android:paddingLeft="20dp"
+                android:paddingRight="20dp" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+</RelativeLayout>

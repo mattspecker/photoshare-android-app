@@ -14,8 +14,8 @@ import { PushNotifications } from '@capacitor/push-notifications';
 // Register custom EventPhotoPicker plugin
 const EventPhotoPicker = registerPlugin('EventPhotoPicker');
 
-// Register PhotoEditor plugin
-const PhotoEditor = registerPlugin('PhotoEditor');
+// Register ImageCropper plugin (uCrop for Android native crop)
+const ImageCropper = registerPlugin('ImageCropper');
 
 // MODERN CAPACITOR 7 PLUGIN REGISTRATION FOR AppPermissions
 console.log('🚀 Registering AppPermissions using modern Capacitor 7 approach...');
@@ -137,7 +137,7 @@ function setupCapacitorAppBridge(appPermissionsPlugin) {
 // Legacy compatibility - also register on window.Capacitor.Plugins if needed
 if (window.Capacitor && window.Capacitor.Plugins) {
     window.Capacitor.Plugins.EventPhotoPicker = EventPhotoPicker;
-    window.Capacitor.Plugins.PhotoEditor = PhotoEditor;
+    window.Capacitor.Plugins.ImageCropper = ImageCropper;
     window.Capacitor.Plugins.AppPermissions = AppPermissions;
     window.Capacitor.Plugins.AppPermissionPlugin = AppPermissions;
 }
@@ -423,21 +423,21 @@ export async function selectFromGalleryWithOptionalEditing(enableEditing = false
   }
 }
 
-// Core photo editing function using @capawesome/capacitor-photo-editor
-async function editPhotoWithCapacitor(photoPath) {
+// Core photo editing function using capacitor-image-cropper (uCrop)
+async function editPhotoWithCapacitor(photoPath, cropOptions = {}) {
   try {
-    console.log('🎨 Starting photo editing for:', photoPath);
+    console.log('🎨 Starting native crop editing for:', photoPath);
     
     // Check platform support (Android only)
     const { Capacitor } = await import('@capacitor/core');
     if (Capacitor.getPlatform() !== 'android') {
-      console.log('⚠️ Photo editing only available on Android');
+      console.log('⚠️ Native crop editing only available on Android');
       return { path: photoPath, edited: false, reason: 'platform_unsupported' };
     }
     
     // Check plugin availability
-    if (!Capacitor.isPluginAvailable('PhotoEditor')) {
-      console.log('⚠️ PhotoEditor plugin not available');
+    if (!Capacitor.isPluginAvailable('ImageCropper')) {
+      console.log('⚠️ ImageCropper plugin not available');
       return { path: photoPath, edited: false, reason: 'plugin_unavailable' };
     }
     
@@ -445,33 +445,46 @@ async function editPhotoWithCapacitor(photoPath) {
     const normalizedPath = normalizePhotoPath(photoPath);
     console.log('🎨 Using normalized path:', normalizedPath);
     
-    // Launch external photo editor
-    const result = await PhotoEditor.editPhoto({
-      path: normalizedPath
-    });
+    // Default crop options for square crop
+    const defaultOptions = {
+      source: normalizedPath,
+      quality: 90,
+      aspectRatioX: 1,
+      aspectRatioY: 1,
+      circle: false,
+      activeControlsWidgetColor: '#9ef500'
+    };
     
-    console.log('🎨 ✅ Photo editing completed:', result);
+    // Merge with provided options
+    const finalOptions = { ...defaultOptions, ...cropOptions };
+    console.log('🎨 Crop options:', finalOptions);
+    
+    // Launch native uCrop
+    const result = await ImageCropper.crop(finalOptions);
+    
+    console.log('🎨 ✅ Native crop completed:', result);
     
     return {
-      path: normalizedPath, // Path remains same (edited in place)
+      path: result.path || normalizedPath,
+      base64: result.base64,
       edited: true,
       success: true,
       result: result
     };
     
   } catch (error) {
-    console.error('🎨 ❌ Photo editing failed:', error);
+    console.error('🎨 ❌ Native crop failed:', error);
     
     // Categorize errors for better UX
     let reason = 'unknown_error';
-    if (error.message && error.message.includes('No app found')) {
-      reason = 'no_editor_app';
+    if (error.message && error.message.includes('cancelled')) {
+      reason = 'user_cancelled';
     } else if (error.message && error.message.includes('Permission')) {
       reason = 'permission_denied';
     } else if (error.message && error.message.includes('File not found')) {
       reason = 'file_not_found';
-    } else if (error.message && error.message.includes('cancelled')) {
-      reason = 'user_cancelled';
+    } else if (error.message && error.message.includes('Source path is required')) {
+      reason = 'invalid_source';
     }
     
     // Return original path if editing fails
@@ -499,10 +512,10 @@ function normalizePhotoPath(photoPath) {
   return photoPath;
 }
 
-// Test function for photo editor integration
+// Test function for native crop integration
 export async function testPhotoEditor() {
   try {
-    console.log('🧪 Testing photo editor integration...');
+    console.log('🧪 Testing native crop integration...');
     
     const { Capacitor } = await import('@capacitor/core');
     
@@ -511,29 +524,29 @@ export async function testPhotoEditor() {
       return { 
         success: false, 
         reason: 'platform_unsupported', 
-        message: 'Photo editor only available on Android' 
+        message: 'Native crop only available on Android' 
       };
     }
     
     // Check plugin availability
-    if (!Capacitor.isPluginAvailable('PhotoEditor')) {
+    if (!Capacitor.isPluginAvailable('ImageCropper')) {
       return { 
         success: false, 
         reason: 'plugin_unavailable', 
-        message: 'PhotoEditor plugin not available' 
+        message: 'ImageCropper plugin not available' 
       };
     }
     
-    console.log('✅ PhotoEditor plugin available on Android platform');
+    console.log('✅ ImageCropper plugin available on Android platform');
     
     return {
       success: true,
       platform: Capacitor.getPlatform(),
       pluginAvailable: true,
-      message: 'Photo editor ready! Use takePictureWithOptionalEditing(true) or selectFromGalleryWithOptionalEditing(true)'
+      message: 'Native crop ready! Use takePictureWithOptionalEditing(true) or selectFromGalleryWithOptionalEditing(true)'
     };
   } catch (error) {
-    console.error('❌ Photo editor test failed:', error);
+    console.error('❌ Native crop test failed:', error);
     return { 
       success: false, 
       error: error.message,
@@ -1533,36 +1546,36 @@ console.log('  • startCameraPreview() - Start preview');
 console.log('  • stopCameraPreview() - Stop preview');
 console.log('  • captureFromPreview() - Capture photo');
 
-// Debug: Check if PhotoEditor plugin is available
-console.log('🎨 PHOTO EDITOR DEBUG: Checking plugin availability...');
-console.log('🎨 PHOTO EDITOR DEBUG: PhotoEditor from registerPlugin:', typeof PhotoEditor);
-console.log('🎨 PHOTO EDITOR DEBUG: PhotoEditor methods from registration:', PhotoEditor ? Object.keys(PhotoEditor) : 'none');
+// Debug: Check if ImageCropper plugin is available
+console.log('🎨 IMAGE CROPPER DEBUG: Checking plugin availability...');
+console.log('🎨 IMAGE CROPPER DEBUG: ImageCropper from registerPlugin:', typeof ImageCropper);
+console.log('🎨 IMAGE CROPPER DEBUG: ImageCropper methods from registration:', ImageCropper ? Object.keys(ImageCropper) : 'none');
 
 setTimeout(() => {
   const { Capacitor } = window;
   if (Capacitor && Capacitor.Plugins) {
-    console.log('🎨 PHOTO EDITOR DEBUG: All available plugins:', Object.keys(Capacitor.Plugins));
+    console.log('🎨 IMAGE CROPPER DEBUG: All available plugins:', Object.keys(Capacitor.Plugins));
     
-    if (Capacitor.Plugins.PhotoEditor) {
-      console.log('✅ PHOTO EDITOR DEBUG: PhotoEditor plugin found in Capacitor.Plugins!');
-      console.log('🎨 PHOTO EDITOR DEBUG: PhotoEditor methods:', Object.keys(Capacitor.Plugins.PhotoEditor));
+    if (Capacitor.Plugins.ImageCropper) {
+      console.log('✅ IMAGE CROPPER DEBUG: ImageCropper plugin found in Capacitor.Plugins!');
+      console.log('🎨 IMAGE CROPPER DEBUG: ImageCropper methods:', Object.keys(Capacitor.Plugins.ImageCropper));
     } else {
-      console.error('❌ PHOTO EDITOR DEBUG: PhotoEditor plugin NOT found in Capacitor.Plugins');
-      console.log('🎨 PHOTO EDITOR DEBUG: Manual registration...', typeof PhotoEditor);
-      if (PhotoEditor && Capacitor.Plugins) {
-        Capacitor.Plugins.PhotoEditor = PhotoEditor;
-        console.log('✅ PHOTO EDITOR DEBUG: Manually registered PhotoEditor');
+      console.error('❌ IMAGE CROPPER DEBUG: ImageCropper plugin NOT found in Capacitor.Plugins');
+      console.log('🎨 IMAGE CROPPER DEBUG: Manual registration...', typeof ImageCropper);
+      if (ImageCropper && Capacitor.Plugins) {
+        Capacitor.Plugins.ImageCropper = ImageCropper;
+        console.log('✅ IMAGE CROPPER DEBUG: Manually registered ImageCropper');
       }
     }
     
     // Check if our enhanced camera functions are available
     if (window.CapacitorPlugins && window.CapacitorPlugins.Camera) {
-      console.log('✅ PHOTO EDITOR DEBUG: Enhanced camera functions available:', Object.keys(window.CapacitorPlugins.Camera));
+      console.log('✅ IMAGE CROPPER DEBUG: Enhanced camera functions available:', Object.keys(window.CapacitorPlugins.Camera));
     } else {
-      console.error('❌ PHOTO EDITOR DEBUG: window.CapacitorPlugins.Camera not available');
+      console.error('❌ IMAGE CROPPER DEBUG: window.CapacitorPlugins.Camera not available');
     }
   } else {
-    console.error('❌ PHOTO EDITOR DEBUG: Capacitor.Plugins not available');
+    console.error('❌ IMAGE CROPPER DEBUG: Capacitor.Plugins not available');
   }
 }, 2000);
 

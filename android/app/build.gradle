@@ -44,6 +44,12 @@ dependencies {
     implementation 'com.github.bumptech.glide:glide:4.15.1'
     annotationProcessor 'com.github.bumptech.glide:compiler:4.15.1'
     
+    // PhotoView for zoom/pan functionality
+    implementation 'com.github.chrisbanes:PhotoView:2.3.0'
+    
+    // ViewPager2 for image swiping
+    implementation "androidx.viewpager2:viewpager2:1.0.0"
+    
     // WorkManager for background uploads
     implementation "androidx.work:work-runtime:2.8.1"
     

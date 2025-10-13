@@ -1,5 +1,9 @@
 [
 	{
+		"pkg": "@capacitor-community/photoviewer",
+		"classpath": "com.getcapacitor.community.media.photoviewer.PhotoViewerPlugin"
+	},
+	{
 		"pkg": "@capacitor-community/safe-area",
 		"classpath": "com.getcapacitor.community.safearea.SafeAreaPlugin"
 	},
@@ -26,9 +30,5 @@
 	{
 		"pkg": "@capacitor/status-bar",
 		"classpath": "com.capacitorjs.plugins.statusbar.StatusBarPlugin"
-	},
-	{
-		"pkg": "@capawesome/capacitor-photo-editor",
-		"classpath": "io.capawesome.capacitorjs.plugins.photoeditor.PhotoEditorPlugin"
 	}
 ]

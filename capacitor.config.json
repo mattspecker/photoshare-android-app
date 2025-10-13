@@ -31,7 +31,7 @@
       "skipNativeAuth": false,
       "providers": ["google.com"]
     },
-    "PhotoEditor": {
+    "ImageCropper": {
       "enabled": true
     },
     "SafeArea": {
@@ -55,6 +55,17 @@
       "spinnerColor": "#999999",
       "splashFullScreen": true,
       "splashImmersive": true
+    },
+    "NativeGallery": {
+      "enabled": true
     }
-  }
+  },
+  "packageClassList": [
+    "app.photoshare.EventPhotoPickerPlugin",
+    "app.photoshare.AppPermissionsPlugin", 
+    "app.photoshare.AutoUploadPlugin",
+    "app.photoshare.EnhancedCameraPlugin",
+    "app.photoshare.CameraPreviewReplacementPlugin",
+    "app.photoshare.NativeGalleryPlugin"
+  ]
 }

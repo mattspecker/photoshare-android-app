@@ -1,5 +1,6 @@
 package app.photoshare;
 
+import android.content.Context;
 import android.util.Log;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -388,5 +389,112 @@ public class AutoUploadPlugin extends Plugin {
         } catch (Exception e) {
             Log.w(TAG, "Error hiding overlay: " + e.getMessage());
         }
+    }
+    
+    /**
+     * Set WiFi-only upload preference (for bulk downloads and uploads)
+     */
+    @PluginMethod
+    public void setWifiOnlyUploadEnabled(PluginCall call) {
+        boolean enabled = call.getBoolean("enabled", false);
+        
+        Log.d(TAG, "📶 Setting WiFi-only preference: " + enabled);
+        
+        // Store in SharedPreferences (using the same prefs as MultiEventAutoUpload)
+        getContext().getSharedPreferences("MultiEventAutoUploadPrefs", Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean("wifiOnlyUpload", enabled)
+            .apply();
+        
+        // Also store in regular photoshare prefs for consistency
+        getContext().getSharedPreferences("photoshare", Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean("wifiOnlyDownload", enabled)
+            .apply();
+        
+        JSObject result = new JSObject();
+        result.put("success", true);
+        result.put("enabled", enabled);
+        result.put("message", "WiFi-only preference updated");
+        
+        call.resolve(result);
+        Log.d(TAG, "✅ WiFi-only preference saved: " + enabled);
+    }
+    
+    /**
+     * Get current network information (for WiFi detection)
+     */
+    @PluginMethod
+    public void getNetworkInfo(PluginCall call) {
+        Log.d(TAG, "📶 Getting network information");
+        
+        JSObject result = new JSObject();
+        
+        try {
+            android.net.ConnectivityManager cm = (android.net.ConnectivityManager) 
+                getContext().getSystemService(Context.CONNECTIVITY_SERVICE);
+            
+            if (cm == null) {
+                result.put("connected", false);
+                result.put("connectionType", "none");
+                result.put("isWifi", false);
+                result.put("error", "No connectivity manager");
+                call.resolve(result);
+                return;
+            }
+            
+            android.net.Network activeNetwork = cm.getActiveNetwork();
+            if (activeNetwork == null) {
+                result.put("connected", false);
+                result.put("connectionType", "none");
+                result.put("isWifi", false);
+                result.put("error", "No active network");
+                call.resolve(result);
+                return;
+            }
+            
+            android.net.NetworkCapabilities capabilities = cm.getNetworkCapabilities(activeNetwork);
+            if (capabilities == null) {
+                result.put("connected", false);
+                result.put("connectionType", "none");
+                result.put("isWifi", false);
+                result.put("error", "No network capabilities");
+                call.resolve(result);
+                return;
+            }
+            
+            boolean isWifi = capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI);
+            boolean isCellular = capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR);
+            boolean isEthernet = capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET);
+            boolean isVpn = capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN);
+            
+            String connectionType = isWifi ? "wifi" : 
+                                   isCellular ? "cellular" : 
+                                   isEthernet ? "ethernet" : 
+                                   isVpn ? "vpn" : "unknown";
+            
+            result.put("connected", true);
+            result.put("connectionType", connectionType);
+            result.put("isWifi", isWifi);
+            result.put("isCellular", isCellular);
+            result.put("isEthernet", isEthernet);
+            result.put("isVpn", isVpn);
+            
+            // Also include WiFi-only preference
+            boolean wifiOnlyEnabled = getContext().getSharedPreferences("MultiEventAutoUploadPrefs", Context.MODE_PRIVATE)
+                .getBoolean("wifiOnlyUpload", false);
+            result.put("wifiOnlyEnabled", wifiOnlyEnabled);
+            
+            Log.d(TAG, "📶 Network info: " + connectionType + " (WiFi: " + isWifi + ", WiFi-only: " + wifiOnlyEnabled + ")");
+            
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error getting network info: " + e.getMessage(), e);
+            result.put("connected", false);
+            result.put("connectionType", "error");
+            result.put("isWifi", false);
+            result.put("error", e.getMessage());
+        }
+        
+        call.resolve(result);
     }
 }

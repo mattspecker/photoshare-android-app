@@ -21,6 +21,7 @@ import app.photoshare.AppPermissionsPlugin;
 import app.photoshare.CameraPreviewReplacementPlugin;
 import app.photoshare.EnhancedCameraPlugin;
 import app.photoshare.AutoUploadPlugin;
+import app.photoshare.NativeGalleryPlugin;
 import java.util.ArrayList;
 
 public class MainActivity extends BridgeActivity {
@@ -65,21 +66,31 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(MultiEventAutoUploadPlugin.class);
         Log.d("MainActivity", "✅ MultiEventAutoUploadPlugin registered successfully");
         
-        // Register PhotoEditor plugin for photo editing capabilities
-        try {
-            @SuppressWarnings("unchecked")
-            Class<? extends Plugin> photoEditorClass = (Class<? extends Plugin>) Class.forName("io.capawesome.capacitorjs.plugins.photoeditor.PhotoEditorPlugin");
-            registerPlugin(photoEditorClass);
-            Log.d("MainActivity", "✅ PhotoEditorPlugin registered successfully");
-        } catch (ClassNotFoundException e) {
-            Log.w("MainActivity", "⚠️ PhotoEditorPlugin class not found - plugin may not be properly installed", e);
-        } catch (ClassCastException e) {
-            Log.w("MainActivity", "⚠️ PhotoEditorPlugin is not a valid Plugin class", e);
-        }
+        // PhotoEditor plugin removed - now using ImageCropper for native crop functionality
         
         // Register CameraPreviewReplacement plugin as "Camera" to intercept native calls
         registerPlugin(CameraPreviewReplacementPlugin.class);
         Log.d("MainActivity", "✅ CameraPreviewReplacementPlugin registered as 'Camera' plugin");
+        
+        // Register NativeGallery plugin for native photo gallery functionality
+        registerPlugin(NativeGalleryPlugin.class);
+        Log.d("MainActivity", "✅ NativeGalleryPlugin registered successfully");
+        
+        // Register BulkDownload plugin for bulk photo download functionality
+        registerPlugin(BulkDownloadPlugin.class);
+        Log.d("MainActivity", "✅ BulkDownloadPlugin registered successfully");
+        
+        // Register ImageCropper plugin for native uCrop functionality
+        try {
+            @SuppressWarnings("unchecked")
+            Class<? extends Plugin> imageCropperClass = (Class<? extends Plugin>) Class.forName("com.emptycode.plugins.imagecropper.ImageCropperPlugin");
+            registerPlugin(imageCropperClass);
+            Log.d("MainActivity", "✅ ImageCropperPlugin registered successfully");
+        } catch (ClassNotFoundException e) {
+            Log.w("MainActivity", "⚠️ ImageCropperPlugin class not found - plugin may not be properly installed", e);
+        } catch (ClassCastException e) {
+            Log.w("MainActivity", "⚠️ ImageCropperPlugin is not a valid Plugin class", e);
+        }
         
         // Note: NPM plugins (BarcodeScanner, PushNotifications, etc.) are auto-registered by Capacitor
         // DO NOT manually register them per Capacitor 7.4.3 guidelines
@@ -129,7 +140,7 @@ public class MainActivity extends BridgeActivity {
                 "  }" +
                 "  " +
                 "  // Test custom plugins" +
-                "  var customPlugins = ['EventPhotoPicker', 'AppPermissions', 'EnhancedCamera', 'AutoUpload', 'CameraPreviewReplacement'];" +
+                "  var customPlugins = ['EventPhotoPicker', 'AppPermissions', 'EnhancedCamera', 'AutoUpload', 'CameraPreviewReplacement', 'NativeGallery', 'BulkDownload'];" +
                 "  for (var i = 0; i < customPlugins.length; i++) {" +
                 "    var pluginName = customPlugins[i];" +
                 "    var available = window.Capacitor.isPluginAvailable(pluginName);" +

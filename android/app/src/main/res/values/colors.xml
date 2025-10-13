@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App theme colors -->
+    <color name="colorPrimary">#6200EE</color>
+    <color name="colorPrimaryDark">#3700B3</color>
+    <color name="colorAccent">#03DAC5</color>
+    
+    <!-- Bulk download colors -->
+    <color name="section_header_background">#F5F5F5</color>
+    <color name="section_header_text">#333333</color>
+    <color name="select_all_button_text">#6200EE</color>
+    <color name="photo_placeholder_background">#E0E0E0</color>
+    <color name="selection_overlay">#4D6200EE</color>
+    
+    <!-- Selection controls -->
+    <color name="selection_bar_background">#FFFFFF</color>
+    <color name="selection_bar_shadow">#E0E0E0</color>
+    <color name="download_button_background">#6200EE</color>
+    <color name="download_button_text">#FFFFFF</color>
+    <color name="clear_button_text">#666666</color>
+    
+    <!-- Checkbox colors -->
+    <color name="checkbox_checked">#6200EE</color>
+    <color name="checkbox_unchecked">#CCCCCC</color>
+    <color name="checkbox_background">#FFFFFF</color>
+</resources>

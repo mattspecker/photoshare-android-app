@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <!-- ViewPager2 for swipeable gallery -->
+    <androidx.viewpager2.widget.ViewPager2
+        android:id="@+id/view_pager"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_centerInParent="true" />
+
+    <!-- Top info bar -->
+    <LinearLayout
+        android:id="@+id/top_info_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentTop="true"
+        android:orientation="horizontal"
+        android:background="@drawable/overlay_gradient_top"
+        android:padding="16dp"
+        android:gravity="center_vertical">
+
+        <!-- Image count -->
+        <TextView
+            android:id="@+id/image_count"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="1 / 38"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <!-- Close button -->
+        <ImageButton
+            android:id="@+id/btn_close"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@android:drawable/ic_menu_close_clear_cancel"
+            android:contentDescription="Close"
+            android:tint="#FFFFFF" />
+
+    </LinearLayout>
+
+    <!-- Bottom info bar -->
+    <LinearLayout
+        android:id="@+id/bottom_info_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:orientation="vertical"
+        android:background="@drawable/overlay_gradient_bottom"
+        android:padding="16dp">
+
+        <!-- Uploader info -->
+        <TextView
+            android:id="@+id/uploader_info"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Photo by mattspecker"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:gravity="center" />
+
+        <!-- Upload date -->
+        <TextView
+            android:id="@+id/upload_date"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Uploaded on Oct 5, 2025"
+            android:textColor="#CCFFFFFF"
+            android:textSize="14sp"
+            android:gravity="center"
+            android:layout_marginTop="4dp" />
+
+        <!-- Action buttons -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_marginTop="16dp">
+
+            <!-- Share button -->
+            <ImageButton
+                android:id="@+id/btn_share"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:src="@android:drawable/ic_menu_share"
+                android:contentDescription="Share photo"
+                android:tint="#FFFFFF"
+                android:padding="12dp"
+                android:layout_marginEnd="16dp" />
+
+            <!-- Download button -->
+            <ImageButton
+                android:id="@+id/btn_download"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:src="@android:drawable/stat_sys_download"
+                android:contentDescription="Download photo"
+                android:tint="#FFFFFF"
+                android:padding="12dp"
+                android:layout_marginEnd="16dp" />
+
+            <!-- Report button -->
+            <ImageButton
+                android:id="@+id/btn_report"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:src="@android:drawable/ic_menu_report_image"
+                android:contentDescription="Report photo"
+                android:tint="#FFFFFF"
+                android:padding="12dp" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <!-- Loading indicator -->
+    <ProgressBar
+        android:id="@+id/progress_bar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_centerInParent="true"
+        android:visibility="visible" />
+
+    <!-- Error message -->
+    <TextView
+        android:id="@+id/error_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_centerInParent="true"
+        android:text="Failed to load image"
+        android:textColor="#FFFFFF"
+        android:textSize="16sp"
+        android:visibility="gone" />
+
+</RelativeLayout>
