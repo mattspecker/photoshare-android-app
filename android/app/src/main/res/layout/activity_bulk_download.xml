@@ -5,11 +5,52 @@
     android:layout_height="match_parent"
     android:background="@android:color/white">
 
+    <!-- Header Bar with Close Button -->
+    <RelativeLayout
+        android:id="@+id/header_bar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_alignParentTop="true"
+        android:background="@color/selection_bar_background"
+        android:elevation="4dp"
+        android:paddingLeft="16dp"
+        android:paddingRight="16dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp">
+
+        <!-- Event Photos Title -->
+        <TextView
+            android:id="@+id/header_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_centerVertical="true"
+            android:text="Event Photos"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="@android:color/black" />
+
+        <!-- Close Button (X) -->
+        <Button
+            android:id="@+id/btn_close"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_alignParentEnd="true"
+            android:layout_centerVertical="true"
+            android:text="✕"
+            android:textSize="18sp"
+            android:textColor="@color/clear_button_text"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true" />
+
+    </RelativeLayout>
+
     <!-- Photo Grid -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/photo_grid"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:layout_below="@+id/header_bar"
         android:layout_above="@+id/selection_controls"
         android:padding="8dp"
         android:clipToPadding="false"

@@ -59,6 +59,7 @@ public class BulkDownloadActivity extends AppCompatActivity {
     private TextView selectionCountText;
     private Button downloadButton;
     private Button clearButton;
+    private Button closeButton;
     
     // Data
     private String eventId;
@@ -98,6 +99,13 @@ public class BulkDownloadActivity extends AppCompatActivity {
         selectionCountText = findViewById(R.id.selection_count);
         downloadButton = findViewById(R.id.btn_download);
         clearButton = findViewById(R.id.btn_clear);
+        closeButton = findViewById(R.id.btn_close);
+        
+        // Set up close button click listener
+        closeButton.setOnClickListener(v -> {
+            Log.d(TAG, "Close button clicked - finishing activity");
+            finish();
+        });
         
         // Initially hide selection controls
         selectionControls.setVisibility(View.GONE);
@@ -350,11 +358,8 @@ public class BulkDownloadActivity extends AppCompatActivity {
                 GalleryPhotoItem photo = selectedPhotos.get(i);
                 final int currentIndex = i + 1;
                 
-                // Update UI on main thread
-                runOnUiThread(() -> {
-                    Toast.makeText(this, "Downloading " + currentIndex + " of " + selectedPhotos.size() + "...", 
-                                  Toast.LENGTH_SHORT).show();
-                });
+                // Update UI on main thread - removed per-photo toast to reduce spam
+                // Progress could be shown in a progress bar instead
                 
                 try {
                     // Download and save the photo
@@ -388,11 +393,24 @@ public class BulkDownloadActivity extends AppCompatActivity {
                 
                 Toast.makeText(this, message, Toast.LENGTH_LONG).show();
                 
-                // Return success result
+                // Clean up adapter to prevent memory issues
+                if (adapter != null) {
+                    adapter.setSectionedPhotos(new ArrayList<>(), new ArrayList<>());
+                    adapter = null;
+                }
+                
+                // Clear photo lists to free memory
+                if (otherPhotos != null) otherPhotos.clear();
+                if (myPhotos != null) myPhotos.clear();
+                
+                // Return success result and close activity
                 Intent resultIntent = new Intent();
                 resultIntent.putExtra("downloaded_count", finalSuccessCount);
                 resultIntent.putExtra("failed_count", finalFailCount);
+                resultIntent.putExtra("should_close", true);
                 setResult(Activity.RESULT_OK, resultIntent);
+                
+                // Finish activity to return to web view
                 finish();
             });
         });
