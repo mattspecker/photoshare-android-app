@@ -57,62 +57,8 @@ public class AppPermissionsPlugin extends Plugin {
     public void load() {
         super.load();
         Log.d(TAG, "🚀 AppPermissionsPlugin loaded successfully");
-        
-        // Inject JavaScript to create CapacitorApp bridge that web app expects
-        String script = 
-            "console.log('🔌 NATIVE: AppPermissions plugin loaded, creating CapacitorApp bridge');" +
-            "if (!window.Capacitor) window.Capacitor = {};" +
-            "if (!window.Capacitor.Plugins) window.Capacitor.Plugins = {};" +
-            "" +
-            "// Create CapacitorApp bridge that routes to AppPermissions plugin" +
-            "window.CapacitorApp = window.CapacitorApp || {};" +
-            "" +
-            "// Route camera permission through AppPermissions plugin" +
-            "window.CapacitorApp.requestCameraPermission = async function() {" +
-            "  console.log('🔥 CapacitorApp.requestCameraPermission called from web');" +
-            "  if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AppPermissions) {" +
-            "    return await window.Capacitor.Plugins.AppPermissions.requestCameraPermission();" +
-            "  } else {" +
-            "    console.error('AppPermissions plugin not available');" +
-            "    return { granted: false, error: 'AppPermissions plugin not available' };" +
-            "  }" +
-            "};" +
-            "" +
-            "// Route photo permission through AppPermissions plugin" +
-            "window.CapacitorApp.requestPhotoPermission = async function() {" +
-            "  console.log('🔥 CapacitorApp.requestPhotoPermission called from web');" +
-            "  if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AppPermissions) {" +
-            "    return await window.Capacitor.Plugins.AppPermissions.requestPhotoPermission();" +
-            "  } else {" +
-            "    console.error('AppPermissions plugin not available');" +
-            "    return { granted: false, error: 'AppPermissions plugin not available' };" +
-            "  }" +
-            "};" +
-            "" +
-            "// Route notification permission through AppPermissions plugin" +
-            "window.CapacitorApp.requestNotificationPermission = async function() {" +
-            "  console.log('🔥 CapacitorApp.requestNotificationPermission called from web');" +
-            "  if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AppPermissions) {" +
-            "    return await window.Capacitor.Plugins.AppPermissions.requestNotificationPermission();" +
-            "  } else {" +
-            "    console.error('AppPermissions plugin not available');" +
-            "    return { granted: false, error: 'AppPermissions plugin not available' };" +
-            "  }" +
-            "};" +
-            "" +
-            "console.log('🔌 NATIVE: CapacitorApp bridge created:', !!window.CapacitorApp);" +
-            "console.log('🔌 NATIVE: CapacitorApp.requestCameraPermission:', typeof window.CapacitorApp.requestCameraPermission);" +
-            "console.log('🔌 NATIVE: CapacitorApp.requestPhotoPermission:', typeof window.CapacitorApp.requestPhotoPermission);" +
-            "" +
-            "// Also create AppPermissionPlugin alias for backward compatibility" +
-            "if (window.Capacitor.Plugins.AppPermissions && !window.Capacitor.Plugins.AppPermissionPlugin) {" +
-            "  window.Capacitor.Plugins.AppPermissionPlugin = window.Capacitor.Plugins.AppPermissions;" +
-            "  console.log('🔌 NATIVE: AppPermissionPlugin alias created');" +
-            "}";
-        
-        getBridge().getWebView().post(() -> {
-            getBridge().getWebView().evaluateJavascript(script, null);
-        });
+        Log.d(TAG, "✅ Plugin registered with BridgeCoordinator for coordinated initialization");
+        Log.d(TAG, "🔗 Bridge creation delegated to centralized BridgeCoordinator");
         
         // Notify JS that plugin is ready using proper Capacitor bridge
         JSObject data = new JSObject();
@@ -130,28 +76,40 @@ public class AppPermissionsPlugin extends Plugin {
     public void isFirstLaunch(PluginCall call) {
         try {
             SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, 0);
-            boolean isFirst = prefs.getBoolean(KEY_FIRST_LAUNCH, true);
+            
+            // Check if onboarding is complete - if it is, this is NOT first launch
+            boolean onboardingComplete = prefs.getBoolean(KEY_ONBOARDING_COMPLETE, false);
+            
+            // Only check first launch flag if onboarding is not complete
+            boolean isFirst;
+            if (onboardingComplete) {
+                // Onboarding is complete, so definitely not first launch
+                isFirst = false;
+                Log.d(TAG, "Onboarding is complete - returning NOT first launch");
+            } else {
+                // Check the first launch flag
+                isFirst = prefs.getBoolean(KEY_FIRST_LAUNCH, true);
+                
+                // If it's the first launch, mark it as no longer first
+                if (isFirst) {
+                    Log.d(TAG, "This IS the first launch - marking as false for next time");
+                    SharedPreferences.Editor editor = prefs.edit();
+                    editor.putBoolean(KEY_FIRST_LAUNCH, false);
+                    boolean success = editor.commit(); // Use commit() instead of apply() to ensure immediate write
+                    Log.d(TAG, "SharedPrefs write success: " + success);
+                    
+                    // Verify the write worked
+                    boolean verification = prefs.getBoolean(KEY_FIRST_LAUNCH, true);
+                    Log.d(TAG, "Verification read after write: " + verification);
+                }
+            }
             
             Log.d(TAG, "=== FIRST LAUNCH CHECK ===");
             Log.d(TAG, "SharedPreferences file: " + PREFS_NAME);
-            Log.d(TAG, "Key: " + KEY_FIRST_LAUNCH);
-            Log.d(TAG, "Current value: " + isFirst);
+            Log.d(TAG, "KEY_FIRST_LAUNCH: " + prefs.getBoolean(KEY_FIRST_LAUNCH, true));
+            Log.d(TAG, "KEY_ONBOARDING_COMPLETE: " + onboardingComplete);
+            Log.d(TAG, "Returning isFirstLaunch: " + isFirst);
             Log.d(TAG, "All prefs: " + prefs.getAll().toString());
-            
-            // If it's the first launch, mark it as no longer first
-            if (isFirst) {
-                Log.d(TAG, "This IS the first launch - marking as false for next time");
-                SharedPreferences.Editor editor = prefs.edit();
-                editor.putBoolean(KEY_FIRST_LAUNCH, false);
-                boolean success = editor.commit(); // Use commit() instead of apply() to ensure immediate write
-                Log.d(TAG, "SharedPrefs write success: " + success);
-                
-                // Verify the write worked
-                boolean verification = prefs.getBoolean(KEY_FIRST_LAUNCH, true);
-                Log.d(TAG, "Verification read after write: " + verification);
-            } else {
-                Log.d(TAG, "This is NOT the first launch - returning false");
-            }
             
             JSObject result = new JSObject();
             result.put("isFirstLaunch", isFirst);
@@ -333,12 +291,18 @@ public class AppPermissionsPlugin extends Plugin {
     @PluginMethod
     public void markOnboardingComplete(PluginCall call) {
         try {
+            Log.d(TAG, "====== Marking Onboarding Complete ======");
+            
             SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, 0);
             SharedPreferences.Editor editor = prefs.edit();
             editor.putBoolean(KEY_ONBOARDING_COMPLETE, true);
             editor.apply();
             
-            Log.d(TAG, "Onboarding marked as complete");
+            Log.d(TAG, "Onboarding marked complete, all future permission checks will return 'granted'");
+            Log.d(TAG, "SharedPreferences: onboardingComplete = true");
+            
+            // Notify BridgeCoordinator that onboarding is complete
+            BridgeCoordinator.getInstance().notifyOnboardingComplete();
             
             JSObject result = new JSObject();
             result.put("success", true);
@@ -509,5 +473,262 @@ public class AppPermissionsPlugin extends Plugin {
         }
         currentPermissionCall.resolve(result);
         currentPermissionCall = null;
+    }
+    
+    // NEW PERMISSION STATUS CHECKING METHODS
+    
+    /**
+     * Check notification permission status without requesting
+     * Returns: { status: 'granted' | 'denied' | 'prompt' }
+     */
+    @PluginMethod
+    public void checkNotificationPermission(PluginCall call) {
+        try {
+            Log.d(TAG, "🔍 Checking notification permission status...");
+            
+            // Check if onboarding is complete first
+            SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, 0);
+            boolean onboardingComplete = prefs.getBoolean(KEY_ONBOARDING_COMPLETE, false);
+            
+            // If onboarding is complete, always return granted
+            if (onboardingComplete) {
+                Log.d(TAG, "Onboarding complete - returning granted for notifications");
+                JSObject result = new JSObject();
+                result.put("status", "granted");
+                call.resolve(result);
+                return;
+            }
+            
+            // Otherwise check actual permission
+            String status;
+            PermissionState state = getPermissionState("notifications");
+            
+            switch (state) {
+                case GRANTED:
+                    status = "granted";
+                    break;
+                case DENIED:
+                    // Check if we can request again (not permanently denied)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        boolean canRequest = getActivity().shouldShowRequestPermissionRationale(android.Manifest.permission.POST_NOTIFICATIONS);
+                        status = canRequest ? "prompt" : "denied";
+                    } else {
+                        // Pre-API 33, notifications are always granted
+                        status = "granted";
+                    }
+                    break;
+                default:
+                    status = "prompt";
+            }
+            
+            Log.d(TAG, "✅ Notification permission status (actual): " + status);
+            
+            JSObject result = new JSObject();
+            result.put("status", status);
+            call.resolve(result);
+            
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error checking notification permission", e);
+            JSObject result = new JSObject();
+            result.put("status", "denied");
+            result.put("error", e.getMessage());
+            call.resolve(result);
+        }
+    }
+    
+    /**
+     * Check camera permission status without requesting
+     * Returns: { status: 'granted' | 'denied' | 'prompt' }
+     */
+    @PluginMethod
+    public void checkCameraPermission(PluginCall call) {
+        try {
+            Log.d(TAG, "🔍 Checking camera permission status...");
+            
+            // Check if onboarding is complete first
+            SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, 0);
+            boolean onboardingComplete = prefs.getBoolean(KEY_ONBOARDING_COMPLETE, false);
+            
+            // If onboarding is complete, always return granted
+            if (onboardingComplete) {
+                Log.d(TAG, "Onboarding complete - returning granted for camera");
+                JSObject result = new JSObject();
+                result.put("status", "granted");
+                call.resolve(result);
+                return;
+            }
+            
+            // Otherwise check actual permission
+            String status;
+            PermissionState state = getPermissionState("camera");
+            
+            switch (state) {
+                case GRANTED:
+                    status = "granted";
+                    break;
+                case DENIED:
+                    // Check if we can request again (not permanently denied)
+                    boolean canRequest = getActivity().shouldShowRequestPermissionRationale(android.Manifest.permission.CAMERA);
+                    status = canRequest ? "prompt" : "denied";
+                    break;
+                default:
+                    status = "prompt";
+            }
+            
+            Log.d(TAG, "✅ Camera permission status (actual): " + status);
+            
+            JSObject result = new JSObject();
+            result.put("status", status);
+            call.resolve(result);
+            
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error checking camera permission", e);
+            JSObject result = new JSObject();
+            result.put("status", "denied");
+            result.put("error", e.getMessage());
+            call.resolve(result);
+        }
+    }
+    
+    /**
+     * Check photo permission status without requesting
+     * Returns: { status: 'granted' | 'denied' | 'prompt' }
+     */
+    @PluginMethod
+    public void checkPhotoPermission(PluginCall call) {
+        try {
+            Log.d(TAG, "🔍 Checking photo permission status...");
+            
+            // Check if onboarding is complete first
+            SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, 0);
+            boolean onboardingComplete = prefs.getBoolean(KEY_ONBOARDING_COMPLETE, false);
+            
+            // If onboarding is complete, always return granted
+            if (onboardingComplete) {
+                Log.d(TAG, "Onboarding complete - returning granted for photos");
+                JSObject result = new JSObject();
+                result.put("status", "granted");
+                call.resolve(result);
+                return;
+            }
+            
+            // Otherwise check actual permission
+            String status;
+            String alias = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ? "photos_modern" : "photos_legacy";
+            PermissionState state = getPermissionState(alias);
+            
+            switch (state) {
+                case GRANTED:
+                    status = "granted";
+                    break;
+                case DENIED:
+                    // Check if we can request again (not permanently denied)
+                    String permission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU 
+                        ? android.Manifest.permission.READ_MEDIA_IMAGES
+                        : android.Manifest.permission.READ_EXTERNAL_STORAGE;
+                    boolean canRequest = getActivity().shouldShowRequestPermissionRationale(permission);
+                    status = canRequest ? "prompt" : "denied";
+                    break;
+                default:
+                    status = "prompt";
+            }
+            
+            Log.d(TAG, "✅ Photo permission status (actual): " + status + " (using alias: " + alias + ")");
+            
+            JSObject result = new JSObject();
+            result.put("status", status);
+            call.resolve(result);
+            
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error checking photo permission", e);
+            JSObject result = new JSObject();
+            result.put("status", "denied");
+            result.put("error", e.getMessage());
+            call.resolve(result);
+        }
+    }
+    
+    /**
+     * Check if onboarding has been completed (for Permission Gate)
+     * Returns true if user has completed the onboarding flow
+     */
+    @PluginMethod
+    public void hasCompletedOnboarding(PluginCall call) {
+        try {
+            SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, 0);
+            boolean completed = prefs.getBoolean(KEY_ONBOARDING_COMPLETE, false);
+            
+            Log.d(TAG, "🔍 hasCompletedOnboarding check: " + completed);
+            
+            JSObject result = new JSObject();
+            result.put("completed", completed);
+            call.resolve(result);
+            
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error checking onboarding completion", e);
+            JSObject result = new JSObject();
+            result.put("completed", false);
+            result.put("error", e.getMessage());
+            call.resolve(result);
+        }
+    }
+    
+    /**
+     * Check actual photo permission status (ignores onboarding completion)
+     * Used for auto-upload safety checks - only runs if user actually granted permission
+     */
+    @PluginMethod
+    public void checkActualPhotoPermission(PluginCall call) {
+        try {
+            Log.d(TAG, "🔍 Checking ACTUAL photo permission status (ignoring onboarding)...");
+            
+            String status;
+            String alias = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ? "photos_modern" : "photos_legacy";
+            PermissionState state = getPermissionState(alias);
+            
+            switch (state) {
+                case GRANTED:
+                    status = "granted";
+                    break;
+                case DENIED:
+                    status = "denied";
+                    break;
+                default:
+                    status = "prompt";
+            }
+            
+            Log.d(TAG, "✅ ACTUAL photo permission status: " + status + " (using alias: " + alias + ")");
+            
+            JSObject result = new JSObject();
+            result.put("status", status);
+            result.put("actualPermission", true); // Flag to indicate this is actual permission check
+            call.resolve(result);
+            
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error checking actual photo permission", e);
+            JSObject result = new JSObject();
+            result.put("status", "denied");
+            result.put("error", e.getMessage());
+            call.resolve(result);
+        }
+    }
+    
+    /**
+     * Helper method for auto-upload: Check if user has actually granted photo permission
+     * Returns true only if photo permission is genuinely granted
+     */
+    public boolean hasActualPhotoPermission() {
+        try {
+            String alias = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ? "photos_modern" : "photos_legacy";
+            PermissionState state = getPermissionState(alias);
+            boolean hasPermission = (state == PermissionState.GRANTED);
+            
+            Log.d(TAG, "📸 Auto-upload permission check - hasActualPhotoPermission: " + hasPermission);
+            return hasPermission;
+            
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error checking actual photo permission for auto-upload", e);
+            return false;
+        }
     }
 }

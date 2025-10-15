@@ -1218,46 +1218,201 @@ function setupSimplePushListeners() {
       console.log('💾 [FCM TOKEN] Stored in localStorage');
     }
     
-    // Call the web's useMobileTokenHandler function for general initialization
-    if (typeof window.useMobileTokenHandler === 'function') {
-      console.log('🔗 [FCM TOKEN] Calling useMobileTokenHandler...');
-      try {
-        // Build params for useMobileTokenHandler
-        const params = {
-          token: token.value,
-          platform: 'android',
-          ...(notificationContext || {}) // Include any context passed during initialization
-        };
-        
-        // Default params if no context provided (general app initialization)
-        if (!notificationContext) {
-          params.eventId = null; // null for general app initialization
-          params.eventName = 'PhotoShare App';
-          params.enabled = true;
+    // Wait for authentication and then register FCM token
+    console.log('🔗 [FCM TOKEN] Starting token registration with auth check...');
+    
+    // Set up auth state listener for immediate registration when user signs in
+    let tokenRegistered = false;
+    const registerToken = async () => {
+      if (!tokenRegistered) {
+        console.log('🔗 [FCM TOKEN] Auth state changed, attempting immediate registration...');
+        const success = await registerFCMTokenWithAuthCheck(token.value);
+        if (success) {
+          tokenRegistered = true;
         }
-        
-        console.log('🔗 [FCM TOKEN] Calling with params:', params);
-        await window.useMobileTokenHandler(params);
-        console.log('✅ [FCM TOKEN] Token registered with PhotoShare web via useMobileTokenHandler');
-      } catch (error) {
-        console.error('❌ [FCM TOKEN] Error calling useMobileTokenHandler:', error);
       }
-    } else if (typeof window.registerFCMToken === 'function') {
-      console.log('🔗 [FCM TOKEN] Fallback: Calling legacy registerFCMToken...');
-      try {
-        window.registerFCMToken(token.value, 'android');
-        console.log('✅ [FCM TOKEN] Token registered with PhotoShare web via legacy method');
-      } catch (error) {
-        console.error('❌ [FCM TOKEN] Error calling registerFCMToken:', error);
-      }
-    } else {
-      console.log('⚠️ [FCM TOKEN] Neither useMobileTokenHandler nor registerFCMToken found');
-      console.log('🔍 [FCM TOKEN] Available window functions:', Object.keys(window).filter(k => k.includes('register') || k.includes('fcm') || k.includes('token') || k.includes('Firebase') || k.includes('firebase') || k.includes('Mobile') || k.includes('mobile')));
+    };
+    
+    // Listen for auth state changes
+    if (window.addEventListener) {
+      window.addEventListener('photoshare-auth-state-changed', registerToken);
+      console.log('🔗 [FCM TOKEN] Added auth state change listener');
+      
+      // Setup delayed Supabase auth listener (wait for supabase to load)
+      const setupSupabaseListener = () => {
+        if (window.supabase && window.supabase.auth) {
+          const authListener = window.supabase.auth.onAuthStateChange((event, session) => {
+            console.log('🔗 [FCM TOKEN] Supabase auth state change:', event, !!session);
+            if (event === 'SIGNED_IN' && session) {
+              console.log('🔗 [FCM TOKEN] User signed in, triggering immediate registration');
+              registerToken();
+            }
+          });
+          console.log('🔗 [FCM TOKEN] Added Supabase auth state listener');
+        } else {
+          console.log('🔗 [FCM TOKEN] Supabase not ready, retrying in 2s...');
+          setTimeout(setupSupabaseListener, 2000);
+        }
+      };
+      
+      setTimeout(setupSupabaseListener, 1000); // Give supabase time to load
     }
+    
+    // Start the retry process
+    await registerToken();
     
     console.log('✅ [FCM TOKEN] Token ready for PhotoShare web to use');
   });
   
+  // Add registration error listener
+  PushNotifications.addListener('registrationError', (error) => {
+    console.error('❌ [FCM ERROR] Registration failed:', error);
+  });
+  
+  console.log('✅ [LISTENERS] Push notification listeners setup complete');
+}
+
+/**
+ * Register FCM token with authentication state checking and retry logic
+ */
+async function registerFCMTokenWithAuthCheck(token) {
+  const maxRetries = 30; // Increased for user sign-in time
+  const retryDelay = 5000; // 5 seconds - longer delays
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    console.log(`🔐 [FCM TOKEN] Attempt ${attempt}/${maxRetries} - Checking auth state...`);
+    
+    try {
+      // Check if user is authenticated
+      const isAuthenticated = await checkAuthenticationState();
+      
+      if (isAuthenticated) {
+        console.log('✅ [FCM TOKEN] User authenticated, proceeding with token registration...');
+        
+        // Try to register the token
+        const success = await attemptTokenRegistration(token, attempt);
+        if (success) {
+          console.log('✅ [FCM TOKEN] Successfully registered token after', attempt, 'attempts');
+          return true;
+        }
+      } else {
+        console.log(`⏳ [FCM TOKEN] User not yet authenticated (attempt ${attempt}/${maxRetries})`);
+      }
+      
+      // Wait before next attempt
+      if (attempt < maxRetries) {
+        console.log(`⏱️ [FCM TOKEN] Waiting ${retryDelay}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+      }
+      
+    } catch (error) {
+      console.error(`❌ [FCM TOKEN] Attempt ${attempt} failed:`, error);
+      
+      if (attempt < maxRetries) {
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+      }
+    }
+  }
+  
+  console.error('❌ [FCM TOKEN] Failed to register token after', maxRetries, 'attempts');
+  return false;
+}
+
+/**
+ * Check if user is properly authenticated
+ */
+async function checkAuthenticationState() {
+  try {
+    // Method 1: Check if supabase client has user
+    if (window.supabase) {
+      const { data: { user }, error } = await window.supabase.auth.getUser();
+      if (user && user.id && !error) {
+        console.log('✅ [AUTH CHECK] Supabase user authenticated:', user.id);
+        return true;
+      }
+    }
+    
+    // Method 2: Check PhotoShare auth bridge
+    if (window.PhotoShareAuthBridge?.isReady && typeof window.PhotoShareAuthBridge.isReady === 'function') {
+      const isReady = await window.PhotoShareAuthBridge.isReady();
+      if (isReady) {
+        console.log('✅ [AUTH CHECK] PhotoShare auth bridge ready');
+        return true;
+      }
+    }
+    
+    // Method 3: Check auth state from localStorage (fallback)
+    if (window.localStorage) {
+      const authData = window.localStorage.getItem('sb-jgfcfdlfcnmaripgpepl-auth-token');
+      if (authData) {
+        try {
+          const parsed = JSON.parse(authData);
+          if (parsed.user && parsed.user.id) {
+            console.log('✅ [AUTH CHECK] Found user in localStorage');
+            return true;
+          }
+        } catch (e) {
+          // Ignore parse errors
+        }
+      }
+    }
+    
+    console.log('⏳ [AUTH CHECK] User not yet authenticated');
+    return false;
+    
+  } catch (error) {
+    console.log('⚠️ [AUTH CHECK] Error checking auth state:', error);
+    return false;
+  }
+}
+
+/**
+ * Attempt to register FCM token with web handlers
+ */
+async function attemptTokenRegistration(token, attempt) {
+  try {
+    // Call the web's useMobileTokenHandler function for general initialization
+    if (typeof window.useMobileTokenHandler === 'function') {
+      console.log(`🔗 [FCM TOKEN] Attempt ${attempt}: Calling useMobileTokenHandler...`);
+      
+      // Build params for useMobileTokenHandler
+      const params = {
+        token: token,
+        platform: 'android',
+        ...(notificationContext || {}) // Include any context passed during initialization
+      };
+      
+      // Default params if no context provided (general app initialization)
+      if (!notificationContext) {
+        params.eventId = null; // null for general app initialization
+        params.eventName = 'PhotoShare App';
+        params.enabled = true;
+      }
+      
+      console.log(`🔗 [FCM TOKEN] Attempt ${attempt}: Calling with params:`, params);
+      await window.useMobileTokenHandler(params);
+      console.log(`✅ [FCM TOKEN] Attempt ${attempt}: Token registered with PhotoShare web via useMobileTokenHandler`);
+      return true;
+      
+    } else if (typeof window.registerFCMToken === 'function') {
+      console.log(`🔗 [FCM TOKEN] Attempt ${attempt}: Fallback: Calling legacy registerFCMToken...`);
+      
+      await window.registerFCMToken(token, 'android');
+      console.log(`✅ [FCM TOKEN] Attempt ${attempt}: Token registered with PhotoShare web via legacy method`);
+      return true;
+      
+    } else {
+      console.log(`⚠️ [FCM TOKEN] Attempt ${attempt}: Neither useMobileTokenHandler nor registerFCMToken found`);
+      console.log('🔍 [FCM TOKEN] Available window functions:', Object.keys(window).filter(k => k.includes('register') || k.includes('fcm') || k.includes('token') || k.includes('Firebase') || k.includes('firebase') || k.includes('Mobile') || k.includes('mobile')));
+      return false;
+    }
+    
+  } catch (error) {
+    console.error(`❌ [FCM TOKEN] Attempt ${attempt} registration error:`, error);
+    return false;
+  }
+}
+
   // Add registration error listener
   PushNotifications.addListener('registrationError', (error) => {
     console.error('❌ [FCM ERROR] Registration failed:', error);
@@ -1376,6 +1531,7 @@ if (typeof window !== 'undefined') {
     },
     PushNotifications: {
       initialize: initializePushNotifications,
+      initializeFCM: initializePushNotifications, // Alias for web team compatibility
       getFCMToken,
       checkPermissions: checkPushPermissions,
       canUsePushNotifications,

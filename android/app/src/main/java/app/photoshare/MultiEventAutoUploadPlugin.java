@@ -2,16 +2,19 @@ package app.photoshare;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
 import android.util.Log;
+import androidx.core.content.ContextCompat;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -154,6 +157,12 @@ public class MultiEventAutoUploadPlugin extends Plugin {
      */
     private void checkAuthStateAndTriggerAutoUpload() {
         Log.d(TAG, "🔐 Checking authentication state before auto-upload...");
+        
+        // CRITICAL: Check Permission Gate before proceeding
+        if (!checkPermissionGateWithRetry()) {
+            Log.d(TAG, "⛔ Auth-triggered auto-upload blocked by Permission Gate - user needs to complete onboarding");
+            return;
+        }
         
         // JavaScript to check if user is authenticated
         String authCheckJs = 
@@ -620,6 +629,26 @@ public class MultiEventAutoUploadPlugin extends Plugin {
         try {
             Log.d(TAG, "🚀 Starting multi-event auto-upload check");
             
+            // CRITICAL: Check Permission Gate before proceeding
+            if (!checkPermissionGateWithRetry()) {
+                Log.d(TAG, "⛔ Auto-upload blocked by Permission Gate - user needs to complete onboarding");
+                JSObject result = new JSObject();
+                result.put("blocked", true);
+                result.put("reason", "permissions_pending");
+                call.resolve(result);
+                return;
+            }
+            
+            // CRITICAL: Check actual photo permission before proceeding
+            if (!hasActualPhotoPermission()) {
+                Log.d(TAG, "⛔ Auto-upload blocked - user has not granted photo/gallery permission");
+                JSObject result = new JSObject();
+                result.put("blocked", true);
+                result.put("reason", "photo_permission_denied");
+                call.resolve(result);
+                return;
+            }
+            
             // Step 1: Get settings from call parameters (passed from JavaScript)
             Boolean autoUploadParam = call.getBoolean("autoUploadEnabled");
             Boolean wifiOnlyParam = call.getBoolean("wifiOnlyUpload");
@@ -1043,6 +1072,18 @@ public class MultiEventAutoUploadPlugin extends Plugin {
     private void triggerAutoUploadWithOverlay() {
         Log.d(TAG, "🎨 Creating native auto-upload overlay...");
         
+        // CRITICAL: Check Permission Gate before proceeding
+        if (!checkPermissionGateWithRetry()) {
+            Log.d(TAG, "⛔ Overlay-triggered auto-upload blocked by Permission Gate - user needs to complete onboarding");
+            return;
+        }
+        
+        // CRITICAL: Check actual photo permission before proceeding
+        if (!hasActualPhotoPermission()) {
+            Log.d(TAG, "⛔ Overlay-triggered auto-upload blocked - user has not granted photo/gallery permission");
+            return;
+        }
+        
         // Must run on UI thread
         new Handler(Looper.getMainLooper()).post(() -> {
             try {
@@ -1059,6 +1100,12 @@ public class MultiEventAutoUploadPlugin extends Plugin {
      */
     private void triggerAutoUploadWithTokens(String userId, String accessToken) {
         Log.d(TAG, "🎨 Creating native auto-upload overlay with pre-extracted tokens...");
+        
+        // CRITICAL: Check Permission Gate before proceeding
+        if (!checkPermissionGateWithRetry()) {
+            Log.d(TAG, "⛔ Token-triggered auto-upload blocked by Permission Gate - user needs to complete onboarding");
+            return;
+        }
         
         // Must run on UI thread
         new Handler(Looper.getMainLooper()).post(() -> {
@@ -1406,6 +1453,20 @@ public class MultiEventAutoUploadPlugin extends Plugin {
     private void checkAllEventsInternal(String userId, boolean autoEnabled, boolean wifiOnly, boolean backgroundEnabled) {
         Log.d(TAG, "🔄 Running internal checkAllEvents...");
         
+        // CRITICAL: Check Permission Gate before proceeding
+        if (!checkPermissionGateWithRetry()) {
+            Log.d(TAG, "⛔ Internal auto-upload blocked by Permission Gate - user needs to complete onboarding");
+            removeNativeOverlayWithDelay(1000);
+            return;
+        }
+        
+        // CRITICAL: Check actual photo permission before proceeding
+        if (!hasActualPhotoPermission()) {
+            Log.d(TAG, "⛔ Internal auto-upload blocked - user has not granted photo/gallery permission");
+            removeNativeOverlayWithDelay(1000);
+            return;
+        }
+        
         try {
             // Step 1: Check global auto-upload setting
             if (!autoEnabled) {
@@ -1479,6 +1540,20 @@ public class MultiEventAutoUploadPlugin extends Plugin {
      */
     private void checkAllEventsInternalWithToken(String userId, boolean autoEnabled, boolean wifiOnly, boolean backgroundEnabled, String accessToken) {
         Log.d(TAG, "🔄 Running internal checkAllEvents with pre-extracted token...");
+        
+        // CRITICAL: Check Permission Gate before proceeding
+        if (!checkPermissionGateWithRetry()) {
+            Log.d(TAG, "⛔ Internal auto-upload (with token) blocked by Permission Gate - user needs to complete onboarding");
+            removeNativeOverlayWithDelay(1000);
+            return;
+        }
+        
+        // CRITICAL: Check actual photo permission before proceeding
+        if (!hasActualPhotoPermission()) {
+            Log.d(TAG, "⛔ Internal auto-upload (with token) blocked - user has not granted photo/gallery permission");
+            removeNativeOverlayWithDelay(1000);
+            return;
+        }
         
         try {
             // Step 1: Check global auto-upload setting
@@ -2191,6 +2266,205 @@ public class MultiEventAutoUploadPlugin extends Plugin {
         } catch (Exception e) {
             Log.e(TAG, "❌ Failed to parse datetime: " + isoDateTime + " - " + e.getMessage());
             return 0;
+        }
+    }
+    
+    /**
+     * Check Permission Gate with retry logic for 'not_ready' state
+     * Returns true if auto-upload can proceed, false if blocked
+     */
+    private boolean checkPermissionGateWithRetry() {
+        int maxRetries = 10; // 10 retries = up to 5 seconds (500ms each)
+        
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            Log.d(TAG, "🔍 Permission Gate check attempt " + attempt + "/" + maxRetries);
+            
+            boolean result = checkPermissionGate();
+            
+            // If gate allows or definitively blocks, return result
+            if (result) {
+                Log.d(TAG, "✅ Permission Gate allows auto-upload on attempt " + attempt);
+                return true;
+            }
+            
+            // If blocked but might be "not_ready", check if we should retry
+            if (attempt < maxRetries) {
+                Log.d(TAG, "⏳ Retrying Permission Gate check in 500ms...");
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    Log.w(TAG, "Permission Gate retry interrupted");
+                    return false;
+                }
+            }
+        }
+        
+        Log.w(TAG, "❌ Permission Gate check failed after " + maxRetries + " attempts - blocking auto-upload");
+        return false;
+    }
+
+    /**
+     * Check Permission Gate state via JavaScript evaluation
+     * Returns true if auto-upload can proceed, false if blocked
+     */
+    private boolean checkPermissionGate() {
+        try {
+            Log.d(TAG, "🔍 Checking Permission Gate state...");
+            
+            // Create a sync Permission Gate check (avoid async syntax errors)
+            String checkScript = 
+                "(function() {" +
+                "  try {" +
+                "    console.log('🤖 NATIVE: Starting Permission Gate check...');" +
+                "    " +
+                "    // Check immediate blocking flags first" +
+                "    if (window.PhotoShareAutoUploadBlocked === true) {" +
+                "      console.log('⛔ NATIVE: PhotoShareAutoUploadBlocked=true, blocking auto-upload');" +
+                "      return JSON.stringify({ blocked: true, reason: 'auto_upload_blocked' });" +
+                "    }" +
+                "    " +
+                "    // Check PhotoSharePermissionGate state" +
+                "    const gate = window.PhotoSharePermissionGate;" +
+                "    if (!gate) {" +
+                "      console.log('⚠️ NATIVE: PhotoSharePermissionGate not found');" +
+                "      return JSON.stringify({ blocked: false, reason: 'gate_not_found' });" +
+                "    }" +
+                "    " +
+                "    console.log('🤖 NATIVE: Gate object found:', JSON.stringify(gate));" +
+                "    " +
+                "    // If still checking, return not ready" +
+                "    if (gate.reason === 'checking') {" +
+                "      console.log('⏳ NATIVE: Permission gate still checking, returning not ready');" +
+                "      return JSON.stringify({ blocked: false, reason: 'not_ready' });" +
+                "    }" +
+                "    " +
+                "    // Gate has determined state" +
+                "    console.log('🤖 NATIVE: Using gate state:', gate.blocked, gate.reason);" +
+                "    return JSON.stringify({" +
+                "      blocked: gate.blocked," +
+                "      reason: gate.reason," +
+                "      timestamp: gate.timestamp" +
+                "    });" +
+                "    " +
+                "  } catch(e) {" +
+                "    console.log('❌ NATIVE: Permission Gate check error:', e.message);" +
+                "    return JSON.stringify({ blocked: false, reason: 'error', error: e.message });" +
+                "  }" +
+                "})();";
+            
+            // Use a blocking approach to get the result
+            final String[] result = {null};
+            final Object lock = new Object();
+            
+            // Must run on UI thread for WebView operations
+            new Handler(Looper.getMainLooper()).post(() -> {
+                try {
+                    if (getBridge() != null && getBridge().getWebView() != null) {
+                        Log.d(TAG, "🔍 Evaluating Permission Gate JavaScript...");
+                        getBridge().getWebView().evaluateJavascript(checkScript, value -> {
+                            synchronized (lock) {
+                                String cleanValue = value != null ? value.replace("\"", "") : "ERROR";
+                                result[0] = cleanValue;
+                                Log.d(TAG, "🔍 Permission Gate JavaScript returned: " + cleanValue);
+                                lock.notify();
+                            }
+                        });
+                    } else {
+                        Log.w(TAG, "❌ No WebView available for Permission Gate check");
+                        synchronized (lock) {
+                            result[0] = "NO_WEBVIEW";
+                            lock.notify();
+                        }
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "❌ Error evaluating permission gate script", e);
+                    synchronized (lock) {
+                        result[0] = "ERROR";
+                        lock.notify();
+                    }
+                }
+            });
+            
+            // Wait for JavaScript evaluation (with longer timeout)
+            synchronized (lock) {
+                try {
+                    lock.wait(5000); // 5 second timeout for Permission Gate check
+                } catch (InterruptedException e) {
+                    Log.w(TAG, "Permission gate check interrupted");
+                    Thread.currentThread().interrupt();
+                }
+            }
+            
+            String gateResult = result[0];
+            Log.d(TAG, "🔍 Permission Gate check result: " + gateResult);
+            
+            // Parse JSON result
+            try {
+                if (gateResult != null && gateResult.startsWith("{")) {
+                    JSONObject json = new JSONObject(gateResult);
+                    boolean blocked = json.optBoolean("blocked", false);
+                    String reason = json.optString("reason", "unknown");
+                    
+                    Log.d(TAG, "🔍 Parsed Permission Gate: blocked=" + blocked + ", reason=" + reason);
+                    
+                    if (blocked) {
+                        Log.d(TAG, "⛔ Permission Gate blocks auto-upload: " + reason);
+                        return false;
+                    } else if ("not_ready".equals(reason)) {
+                        Log.d(TAG, "⏳ Permission Gate not ready, will retry in 500ms");
+                        // Instead of allowing, return false and let the caller retry
+                        return false;
+                    } else {
+                        Log.d(TAG, "✅ Permission Gate allows auto-upload: " + reason);
+                        return true;
+                    }
+                } else {
+                    // Legacy string result or null
+                    if ("BLOCKED".equals(gateResult)) {
+                        Log.d(TAG, "⛔ Permission Gate blocks auto-upload (legacy)");
+                        return false;
+                    } else {
+                        Log.w(TAG, "⚠️ Permission Gate state unknown (" + gateResult + "), allowing auto-upload");
+                        return true;
+                    }
+                }
+            } catch (Exception parseError) {
+                Log.w(TAG, "❌ Error parsing Permission Gate result: " + parseError.getMessage());
+                // On parse error, allow auto-upload for backward compatibility
+                return true;
+            }
+            
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error checking Permission Gate", e);
+            // If error checking, allow auto-upload to maintain backward compatibility
+            return true;
+        }
+    }
+    
+    /**
+     * Check if user has actually granted photo permission for auto-upload
+     * This bypasses the onboarding completion check and checks actual permission status
+     */
+    private boolean hasActualPhotoPermission() {
+        try {
+            // Check actual photo permission using Android's permission system directly
+            String permission;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                permission = android.Manifest.permission.READ_MEDIA_IMAGES;
+            } else {
+                permission = android.Manifest.permission.READ_EXTERNAL_STORAGE;
+            }
+            
+            boolean hasPermission = ContextCompat.checkSelfPermission(getContext(), permission) 
+                == PackageManager.PERMISSION_GRANTED;
+            
+            Log.d(TAG, "📸 Auto-upload actual photo permission check: " + hasPermission + " (permission: " + permission + ")");
+            return hasPermission;
+            
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error checking actual photo permission for auto-upload", e);
+            return false; // Default to no permission if we can't check
         }
     }
     

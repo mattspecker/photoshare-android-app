@@ -103,6 +103,19 @@ public class MainActivity extends BridgeActivity {
         
         Log.d("MainActivity", "=== CAPACITOR INITIALIZATION COMPLETE ===");
         
+        // Initialize centralized bridge coordination
+        BridgeCoordinator.getInstance().initialize(bridge);
+        Log.d("MainActivity", "✅ BridgeCoordinator initialized");
+        
+        // Inject BridgeCoordinator JavaScript interface
+        injectBridgeCoordinatorInterface();
+        
+        // CRITICAL: Immediately block auto-upload before any web content loads
+        injectImmediateAutoUploadBlock();
+        
+        // CRITICAL: Setup Permission Gate listeners FIRST before any auto-upload can start
+        setupPermissionGateListeners();
+        
         // CRITICAL: Configure WebView settings for Supabase WebSocket connections
         // Must be AFTER super.onCreate() when WebView exists
         configureWebViewForSupabase();
@@ -263,55 +276,8 @@ public class MainActivity extends BridgeActivity {
             "    console.log('📷 Registering BarcodeScanner plugin...');" +
             "    const BarcodeScanner = window.Capacitor.registerPlugin('BarcodeScanner');" +
             "    " +
-            "    // CREATE CAPACITOR APP BRIDGE - This is what the web app expects" +
-            "    console.log('🔥 Creating CapacitorApp bridge for web app compatibility...');" +
-            "    window.CapacitorApp = {" +
-            "      requestCameraPermission: async function() {" +
-            "        console.log('🔥 CapacitorApp.requestCameraPermission called');" +
-            "        if (AppPermissions && AppPermissions.requestCameraPermission) {" +
-            "          return await AppPermissions.requestCameraPermission();" +
-            "        } else {" +
-            "          console.error('AppPermissions.requestCameraPermission not available');" +
-            "          return { granted: false, error: 'AppPermissions plugin not available' };" +
-            "        }" +
-            "      }," +
-            "      requestPhotoPermission: async function() {" +
-            "        console.log('🔥 CapacitorApp.requestPhotoPermission called');" +
-            "        if (AppPermissions && AppPermissions.requestPhotoPermission) {" +
-            "          return await AppPermissions.requestPhotoPermission();" +
-            "        } else {" +
-            "          console.error('AppPermissions.requestPhotoPermission not available');" +
-            "          return { granted: false, error: 'AppPermissions plugin not available' };" +
-            "        }" +
-            "      }," +
-            "      requestNotificationPermission: async function() {" +
-            "        console.log('🔥 CapacitorApp.requestNotificationPermission called');" +
-            "        if (AppPermissions && AppPermissions.requestNotificationPermission) {" +
-            "          return await AppPermissions.requestNotificationPermission();" +
-            "        } else {" +
-            "          console.error('AppPermissions.requestNotificationPermission not available');" +
-            "          return { granted: false, error: 'AppPermissions plugin not available' };" +
-            "        }" +
-            "      }" +
-            "    };" +
-            "    " +
-            "    console.log('✅ CapacitorApp bridge created successfully');" +
-            "    console.log('🔥 CapacitorApp.requestCameraPermission type:', typeof window.CapacitorApp.requestCameraPermission);" +
-            "    console.log('🔥 CapacitorApp.requestPhotoPermission type:', typeof window.CapacitorApp.requestPhotoPermission);" +
-            "    " +
-            "    // CRITICAL: Fire a custom event to notify web app that CapacitorApp is ready" +
-            "    console.log('🚨 Firing capacitor-app-ready event for web app timing...');" +
-            "    window.dispatchEvent(new CustomEvent('capacitor-app-ready', { " +
-            "      detail: { " +
-            "        timestamp: Date.now(), " +
-            "        available: true, " +
-            "        functions: ['requestCameraPermission', 'requestPhotoPermission', 'requestNotificationPermission'] " +
-            "      } " +
-            "    }));" +
-            "    " +
-            "    // Also create a polling-friendly flag" +
-            "    window._capacitorAppReady = true;" +
-            "    console.log('🚨 Set window._capacitorAppReady = true for polling detection');" +
+            "    // CapacitorApp bridge creation delegated to BridgeCoordinator" +
+            "    console.log('🔗 CapacitorApp bridge creation delegated to BridgeCoordinator after onboarding');" +
             "    " +
             "    // Test EventPhotoPicker plugin" +
             "    console.log('🧪 Testing EventPhotoPicker plugin...');" +
@@ -565,71 +531,10 @@ public class MainActivity extends BridgeActivity {
             
         webView.evaluateJavascript(cameraPreviewMonitorScript, null);
         
-        // IMMEDIATE CapacitorApp bridge creation - bypasses plugin registration timing
+        // CapacitorApp bridge creation is now handled by BridgeCoordinator
         String immediateCapacitorAppScript = 
-            "console.log('🔥 IMMEDIATE: Creating CapacitorApp bridge directly...');" +
-            "" +
-            "// Create CapacitorApp immediately - don't wait for plugin registration" +
-            "window.CapacitorApp = window.CapacitorApp || {};" +
-            "" +
-            "// Try to get AppPermissions plugin directly" +
-            "const getAppPermissions = () => {" +
-            "  if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AppPermissions) {" +
-            "    console.log('🔥 IMMEDIATE: AppPermissions plugin found!');" +
-            "    return window.Capacitor.Plugins.AppPermissions;" +
-            "  }" +
-            "  console.log('🔥 IMMEDIATE: AppPermissions plugin not yet available');" +
-            "  return null;" +
-            "};" +
-            "" +
-            "// Create camera permission function" +
-            "window.CapacitorApp.requestCameraPermission = async function() {" +
-            "  console.log('🔥 IMMEDIATE: CapacitorApp.requestCameraPermission called');" +
-            "  const appPermissions = getAppPermissions();" +
-            "  if (appPermissions && appPermissions.requestCameraPermission) {" +
-            "    console.log('🔥 IMMEDIATE: Calling AppPermissions.requestCameraPermission');" +
-            "    return await appPermissions.requestCameraPermission();" +
-            "  } else {" +
-            "    console.error('🔥 IMMEDIATE: AppPermissions not available');" +
-            "    return { granted: false, error: 'AppPermissions plugin not available' };" +
-            "  }" +
-            "};" +
-            "" +
-            "// Create photo permission function" +
-            "window.CapacitorApp.requestPhotoPermission = async function() {" +
-            "  console.log('🔥 IMMEDIATE: CapacitorApp.requestPhotoPermission called');" +
-            "  const appPermissions = getAppPermissions();" +
-            "  if (appPermissions && appPermissions.requestPhotoPermission) {" +
-            "    console.log('🔥 IMMEDIATE: Calling AppPermissions.requestPhotoPermission');" +
-            "    return await appPermissions.requestPhotoPermission();" +
-            "  } else {" +
-            "    console.error('🔥 IMMEDIATE: AppPermissions not available');" +
-            "    return { granted: false, error: 'AppPermissions plugin not available' };" +
-            "  }" +
-            "};" +
-            "" +
-            "// Create notification permission function" +
-            "window.CapacitorApp.requestNotificationPermission = async function() {" +
-            "  console.log('🔥 IMMEDIATE: CapacitorApp.requestNotificationPermission called');" +
-            "  const appPermissions = getAppPermissions();" +
-            "  if (appPermissions && appPermissions.requestNotificationPermission) {" +
-            "    console.log('🔥 IMMEDIATE: Calling AppPermissions.requestNotificationPermission');" +
-            "    return await appPermissions.requestNotificationPermission();" +
-            "  } else {" +
-            "    console.error('🔥 IMMEDIATE: AppPermissions not available');" +
-            "    return { granted: false, error: 'AppPermissions plugin not available' };" +
-            "  }" +
-            "};" +
-            "" +
-            "console.log('🔥 IMMEDIATE: CapacitorApp bridge created');" +
-            "console.log('🔥 IMMEDIATE: Functions available:', Object.keys(window.CapacitorApp));" +
-            "" +
-            "// Fire ready event" +
-            "window.dispatchEvent(new CustomEvent('capacitor-app-ready', { " +
-            "  detail: { timestamp: Date.now(), source: 'immediate' } " +
-            "}));" +
-            "window._capacitorAppReady = true;" +
-            "console.log('🔥 IMMEDIATE: Ready events fired');";
+            "console.log('🔗 IMMEDIATE: CapacitorApp bridge creation delegated to BridgeCoordinator');" +
+            "console.log('🔗 IMMEDIATE: Bridge will be created after onboarding completion');";
         
         // Execute scripts with immediate plugin setup
         webView.post(() -> {
@@ -838,6 +743,13 @@ public class MainActivity extends BridgeActivity {
                 "function triggerAutoUploadCheck() {" +
                 "  try {" +
                 "    console.log('🚀 Triggering auto-upload check...');" +
+                "    " +
+                "    // Check Permission Gate before proceeding" +
+                "    if (window.PhotoShareAutoUploadBlocked) {" +
+                "      console.log('⛔ Auto-upload check blocked by Permission Gate');" +
+                "      return;" +
+                "    }" +
+                "    " +
                 "    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AutoUpload) {" +
                 "      window.Capacitor.Plugins.AutoUpload.checkAndUploadPhotos().then(function(result) {" +
                 "        console.log('✅ Auto-upload completed:', result);" +
@@ -855,11 +767,40 @@ public class MainActivity extends BridgeActivity {
                 "  }" +
                 "}" +
                 "" +
-                "// Initial auto-upload check after app loads (10 seconds)" +
-                "setTimeout(function() {" +
-                "  console.log('🔥 Running initial auto-upload check after app load');" +
-                "  triggerAutoUploadCheck();" +
-                "}, 10000);" +
+                "// Initial auto-upload check - wait for onboarding completion" +
+                "console.log('🔥 Scheduling auto-upload to wait for onboarding completion');" +
+                "if (window.BridgeCoordinator && window.BridgeCoordinator.executeWhenOnboardingComplete) {" +
+                "  window.BridgeCoordinator.executeWhenOnboardingComplete(function() {" +
+                "    console.log('🔥 Running auto-upload check after onboarding completed');" +
+                "    " +
+                "    // Check Permission Gate before starting auto-upload" +
+                "    if (window.PhotoShareAutoUploadBlocked) {" +
+                "      console.log('⛔ Auto-upload blocked by Permission Gate - waiting for permissions');" +
+                "      return;" +
+                "    }" +
+                "    " +
+                "    triggerAutoUploadCheck();" +
+                "    " +
+                "    // Also initialize push notifications after onboarding" +
+                "    console.log('🔔 Initializing push notifications after onboarding completion');" +
+                "    if (window.CapacitorPlugins && window.CapacitorPlugins.PushNotifications && window.CapacitorPlugins.PushNotifications.initialize) {" +
+                "      window.CapacitorPlugins.PushNotifications.initialize().then(function(result) {" +
+                "        console.log('✅ Push notifications initialized after onboarding:', result);" +
+                "      }).catch(function(error) {" +
+                "        console.error('❌ Push notifications initialization failed:', error);" +
+                "      });" +
+                "    } else {" +
+                "      console.log('⚠️ Push notifications not available');" +
+                "    }" +
+                "  });" +
+                "} else {" +
+                "  // Fallback for legacy - wait 10 seconds" +
+                "  console.log('🔥 BridgeCoordinator not available, using legacy timing');" +
+                "  setTimeout(function() {" +
+                "    console.log('🔥 Running initial auto-upload check after app load (legacy)');" +
+                "    triggerAutoUploadCheck();" +
+                "  }, 10000);" +
+                "}" +
                 "" +
                 "// Periodic auto-upload checks every 5 minutes" +
                 "setInterval(function() {" +
@@ -890,26 +831,267 @@ public class MainActivity extends BridgeActivity {
         }, 3000); // Wait 3 seconds for web app to load
         
         Log.d("MainActivity", "✅ Auto-upload monitoring setup complete");
+    }
+    
+    private void injectBridgeCoordinatorInterface() {
+        Log.d("MainActivity", "🔥 Injecting BridgeCoordinator JavaScript interface");
         
-        // Final plugin availability check after all initialization
-        getBridge().getWebView().post(() -> {
-            getBridge().getWebView().evaluateJavascript(
-                "setTimeout(() => {" +
-                "  console.log('🔍 FINAL PLUGIN AVAILABILITY CHECK:');" +
-                "  console.log('📋 Available Capacitor plugins:', Object.keys(window.Capacitor?.Plugins || {}));" +
-                "  if (window.Capacitor?.Plugins?.EventPhotoPicker) {" +
-                "    console.log('✅ SUCCESS: EventPhotoPicker is available in Capacitor.Plugins');" +
-                "    window.Capacitor.Plugins.EventPhotoPicker.testPlugin().then(result => {" +
-                "      console.log('🧪 EventPhotoPicker test result:', result);" +
-                "    }).catch(error => {" +
-                "      console.error('❌ EventPhotoPicker test failed:', error);" +
-                "    });" +
-                "  } else {" +
-                "    console.error('❌ FAILED: EventPhotoPicker is NOT available in Capacitor.Plugins');" +
-                "  }" +
-                "}, 3000);", // Wait 3 seconds for everything to initialize
-                null
-            );
+        WebView webView = bridge.getWebView();
+        if (webView == null) {
+            Log.e("MainActivity", "❌ WebView not available for BridgeCoordinator interface");
+            return;
+        }
+        
+        String bridgeCoordinatorScript = 
+            "console.log('🔥 BRIDGE COORDINATOR: Creating JavaScript interface...');" +
+            "" +
+            "// Create BridgeCoordinator JavaScript interface" +
+            "window.BridgeCoordinator = {" +
+            "  executeWhenOnboardingComplete: function(callback) {" +
+            "    console.log('🔥 BRIDGE COORDINATOR: executeWhenOnboardingComplete called');" +
+            "    " +
+            "    // Check if onboarding is already complete" +
+            "    if (window.isOnboardingComplete && window.isOnboardingComplete()) {" +
+            "      console.log('🔥 BRIDGE COORDINATOR: Onboarding already complete, executing immediately');" +
+            "      callback();" +
+            "      return;" +
+            "    }" +
+            "    " +
+            "    // Wait for onboarding completion event" +
+            "    console.log('🔥 BRIDGE COORDINATOR: Waiting for onboarding completion...');" +
+            "    window.addEventListener('onboarding-complete', function(event) {" +
+            "      console.log('🔥 BRIDGE COORDINATOR: Onboarding complete event received, executing callback');" +
+            "      callback();" +
+            "    }, { once: true });" +
+            "  }" +
+            "};" +
+            "" +
+            "// Create centralized CapacitorApp bridge function" +
+            "function createCapacitorAppBridge() {" +
+            "  console.log('🔗 BRIDGE COORDINATOR: Creating CapacitorApp bridge...');" +
+            "  " +
+            "  // Get AppPermissions plugin" +
+            "  const getAppPermissions = () => {" +
+            "    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AppPermissions) {" +
+            "      return window.Capacitor.Plugins.AppPermissions;" +
+            "    }" +
+            "    return null;" +
+            "  };" +
+            "  " +
+            "  // Create CapacitorApp bridge that web app expects" +
+            "  window.CapacitorApp = {" +
+            "    requestCameraPermission: async function() {" +
+            "      console.log('🔗 CapacitorApp.requestCameraPermission called via BridgeCoordinator');" +
+            "      const appPermissions = getAppPermissions();" +
+            "      if (appPermissions && appPermissions.requestCameraPermission) {" +
+            "        return await appPermissions.requestCameraPermission();" +
+            "      } else {" +
+            "        return { granted: false, error: 'AppPermissions plugin not available' };" +
+            "      }" +
+            "    }," +
+            "    requestPhotoPermission: async function() {" +
+            "      console.log('🔗 CapacitorApp.requestPhotoPermission called via BridgeCoordinator');" +
+            "      const appPermissions = getAppPermissions();" +
+            "      if (appPermissions && appPermissions.requestPhotoPermission) {" +
+            "        return await appPermissions.requestPhotoPermission();" +
+            "      } else {" +
+            "        return { granted: false, error: 'AppPermissions plugin not available' };" +
+            "      }" +
+            "    }," +
+            "    requestNotificationPermission: async function() {" +
+            "      console.log('🔗 CapacitorApp.requestNotificationPermission called via BridgeCoordinator');" +
+            "      const appPermissions = getAppPermissions();" +
+            "      if (appPermissions && appPermissions.requestNotificationPermission) {" +
+            "        return await appPermissions.requestNotificationPermission();" +
+            "      } else {" +
+            "        return { granted: false, error: 'AppPermissions plugin not available' };" +
+            "      }" +
+            "    }" +
+            "  };" +
+            "  " +
+            "  // Fire ready events" +
+            "  window.dispatchEvent(new CustomEvent('capacitor-app-ready', {" +
+            "    detail: {" +
+            "      timestamp: Date.now()," +
+            "      source: 'bridge-coordinator'," +
+            "      functions: ['requestCameraPermission', 'requestPhotoPermission', 'requestNotificationPermission']" +
+            "    }" +
+            "  }));" +
+            "  window._capacitorAppReady = true;" +
+            "  " +
+            "  console.log('✅ BRIDGE COORDINATOR: CapacitorApp bridge created');" +
+            "}" +
+            "" +
+            "// Helper function to check if onboarding is complete" +
+            "window.isOnboardingComplete = function() {" +
+            "  return window.PhotoShareBridgeState ? window.PhotoShareBridgeState.onboardingComplete : false;" +
+            "};" +
+            "" +
+            "// Create the bridge after onboarding is complete" +
+            "window.BridgeCoordinator.executeWhenOnboardingComplete(function() {" +
+            "  console.log('🔗 BRIDGE COORDINATOR: Onboarding complete, creating CapacitorApp bridge');" +
+            "  createCapacitorAppBridge();" +
+            "});" +
+            "" +
+            "console.log('✅ BRIDGE COORDINATOR: JavaScript interface ready');" +
+            "console.log('🔥 BRIDGE COORDINATOR: executeWhenOnboardingComplete available at window.BridgeCoordinator.executeWhenOnboardingComplete');";
+        
+        webView.post(() -> {
+            webView.evaluateJavascript(bridgeCoordinatorScript, result -> {
+                Log.d("MainActivity", "✅ BridgeCoordinator JavaScript interface injected");
+            });
+        });
+    }
+    
+    private void injectImmediateAutoUploadBlock() {
+        Log.d("MainActivity", "🚫 Injecting immediate auto-upload block");
+        
+        WebView webView = bridge.getWebView();
+        if (webView == null) {
+            Log.e("MainActivity", "❌ WebView not available for immediate block");
+            return;
+        }
+        
+        String immediateBlockScript = 
+            "(function() {" +
+            "  console.log('🚫 IMMEDIATE: Blocking auto-upload until permission gate ready');" +
+            "  window.PhotoShareAutoUploadBlocked = true;" +
+            "  " +
+            "  // Also block MultiEventAutoUpload if it exists" +
+            "  if (window.MultiEventAutoUpload) {" +
+            "    if (window.MultiEventAutoUpload.pause) {" +
+            "      window.MultiEventAutoUpload.pause();" +
+            "      console.log('🛑 IMMEDIATE: Paused existing MultiEventAutoUpload');" +
+            "    }" +
+            "  }" +
+            "  " +
+            "  // Override MultiEventAutoUpload constructor/start to respect gate" +
+            "  const originalMultiEventAutoUpload = window.MultiEventAutoUpload;" +
+            "  if (!window.MultiEventAutoUploadOverridden) {" +
+            "    Object.defineProperty(window, 'MultiEventAutoUpload', {" +
+            "      get: function() { return originalMultiEventAutoUpload; }," +
+            "      set: function(value) {" +
+            "        console.log('🔍 OVERRIDE: MultiEventAutoUpload being set, adding gate check');" +
+            "        if (value && typeof value === 'object') {" +
+            "          const originalStart = value.start;" +
+            "          if (originalStart) {" +
+            "            value.start = function() {" +
+            "              if (window.PhotoShareAutoUploadBlocked) {" +
+            "                console.log('⛔ OVERRIDE: MultiEventAutoUpload.start() blocked by Permission Gate');" +
+            "                return;" +
+            "              }" +
+            "              console.log('▶️ OVERRIDE: MultiEventAutoUpload.start() proceeding');" +
+            "              return originalStart.apply(this, arguments);" +
+            "            };" +
+            "          }" +
+            "        }" +
+            "        originalMultiEventAutoUpload = value;" +
+            "      }" +
+            "    });" +
+            "    window.MultiEventAutoUploadOverridden = true;" +
+            "    console.log('✅ IMMEDIATE: MultiEventAutoUpload override installed');" +
+            "  }" +
+            "})();";
+        
+        webView.post(() -> {
+            webView.evaluateJavascript(immediateBlockScript, result -> {
+                Log.d("MainActivity", "✅ Immediate auto-upload block injected");
+            });
+        });
+    }
+    
+    private void setupPermissionGateListeners() {
+        Log.d("MainActivity", "🎯 Setting up Permission Gate listeners for auto-upload coordination");
+        
+        WebView webView = bridge.getWebView();
+        if (webView == null) {
+            Log.e("MainActivity", "❌ WebView not available for Permission Gate setup");
+            return;
+        }
+        
+        String permissionGateScript = 
+            "(function() {" +
+            "  console.log('🎯 Android: Setting up permission gate listeners...');" +
+            "  " +
+            "  // IMMEDIATE: Block auto-upload by default until we verify permissions" +
+            "  window.PhotoShareAutoUploadBlocked = true;" +
+            "  console.log('⛔ Android: Auto-upload BLOCKED by default until permission gate checked');" +
+            "  " +
+            "  // Wait for Permission Gate to be available" +
+            "  function waitForPermissionGate(callback, attempts = 0) {" +
+            "    if (attempts >= 50) {" +
+            "      console.log('⚠️ Android: Permission gate not found after 50 attempts, proceeding without');" +
+            "      return;" +
+            "    }" +
+            "    " +
+            "    if (typeof window.PhotoSharePermissionGate !== 'undefined') {" +
+            "      console.log('✅ Android: Permission gate found, setting up listeners');" +
+            "      callback();" +
+            "    } else {" +
+            "      setTimeout(() => waitForPermissionGate(callback, attempts + 1), 100);" +
+            "    }" +
+            "  }" +
+            "  " +
+            "  waitForPermissionGate(function() {" +
+            "    // Check initial state" +
+            "    if (window.PhotoSharePermissionGate?.blocked) {" +
+            "      console.log('⛔ Android: Permissions BLOCKED - auto-upload should NOT start');" +
+            "      window.PhotoShareAutoUploadBlocked = true;" +
+            "    } else {" +
+            "      console.log('✅ Android: Permissions OK - auto-upload can proceed');" +
+            "      window.PhotoShareAutoUploadBlocked = false;" +
+            "    }" +
+            "    " +
+            "    // Listen for permissions-pending event (block auto-upload)" +
+            "    window.addEventListener('photoshare-permissions-pending', function(event) {" +
+            "      console.log('⛔ Android: Received permissions-pending event', event.detail);" +
+            "      window.PhotoShareAutoUploadBlocked = true;" +
+            "      " +
+            "      // Try to pause existing auto-upload if it exists" +
+            "      if (window.MultiEventAutoUpload?.pause) {" +
+            "        window.MultiEventAutoUpload.pause();" +
+            "        console.log('🛑 Android: Auto-upload paused via MultiEventAutoUpload.pause()');" +
+            "      }" +
+            "      " +
+            "      // Also prevent our native auto-upload trigger" +
+            "      if (window.testAutoUpload) {" +
+            "        console.log('🛑 Android: Native auto-upload trigger blocked');" +
+            "      }" +
+            "    });" +
+            "    " +
+            "    // Listen for permissions-complete event (resume auto-upload)" +
+            "    window.addEventListener('photoshare-permissions-complete', function(event) {" +
+            "      console.log('✅ Android: Received permissions-complete event', event.detail);" +
+            "      window.PhotoShareAutoUploadBlocked = false;" +
+            "      " +
+            "      // Try to start/resume auto-upload" +
+            "      if (window.MultiEventAutoUpload?.start) {" +
+            "        window.MultiEventAutoUpload.start();" +
+            "        console.log('▶️ Android: Auto-upload started/resumed via MultiEventAutoUpload.start()');" +
+            "      }" +
+            "      " +
+            "      // Also trigger our native auto-upload if it was waiting" +
+            "      setTimeout(function() {" +
+            "        if (window.testAutoUpload && !window.PhotoShareAutoUploadBlocked) {" +
+            "          console.log('▶️ Android: Triggering native auto-upload after permission completion');" +
+            "          window.testAutoUpload();" +
+            "        }" +
+            "      }, 1000);" + // Small delay to ensure web auto-upload starts first
+            "    });" +
+            "    " +
+            "    console.log('✅ Android: Permission gate listeners registered');" +
+            "    " +
+            "    // Log current gate state for debugging" +
+            "    if (window.PhotoSharePermissionGate) {" +
+            "      console.log('🔍 Android: Initial gate state:', JSON.stringify(window.PhotoSharePermissionGate));" +
+            "    }" +
+            "  });" +
+            "})();";
+        
+        webView.post(() -> {
+            webView.evaluateJavascript(permissionGateScript, result -> {
+                Log.d("MainActivity", "✅ Permission Gate listeners injected");
+            });
         });
     }
     
