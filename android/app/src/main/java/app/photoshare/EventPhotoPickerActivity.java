@@ -21,7 +21,21 @@ import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import android.webkit.WebView;
 import android.webkit.ValueCallback;
+import app.photoshare.UploadProgressOverlay;
 import android.webkit.WebSettings;
+import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.LayerDrawable;
+import android.view.Gravity;
+import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.view.ViewGroup;
+import android.widget.ImageView;
+import android.widget.ProgressBar;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.provider.MediaStore;
+import java.io.InputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -38,6 +52,7 @@ import java.util.Set;
 
 public class EventPhotoPickerActivity extends AppCompatActivity implements PhotoGridAdapter.OnSelectionChangedListener {
     private static final String TAG = "EventPhotoPickerActivity";
+    private List<PhotoItem> currentSelectedPhotos; // Store for overlay access
     public static final String EXTRA_EVENT_ID = "event_id";
     public static final String EXTRA_EVENT_NAME = "event_name";
     public static final String EXTRA_START_TIME = "start_time";
@@ -85,12 +100,8 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_event_photo_picker);
 
-        // Hide status bar and make fullscreen
-        getWindow().getDecorView().setSystemUiVisibility(
-            View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
-            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
-            View.SYSTEM_UI_FLAG_FULLSCREEN
-        );
+        // Configure status bar to not overlay content (matching MainActivity approach)
+        configureStatusBar();
 
         initViews();
         extractIntentData();
@@ -203,7 +214,7 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
 
             // IMPROVED UX: Show upload overlay immediately for instant feedback
             Log.d(TAG, "🚀 Showing upload overlay immediately after button click");
-            showUploadOverlayImmediately(selectedPhotos.size());
+            showUploadOverlayImmediately(selectedPhotos.size(), selectedPhotos);
             
             // Process photos in background 
             processSelectedPhotos(selectedPhotos);
@@ -316,7 +327,18 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
     public void onSelectionChanged(int selectedCount) {
         tvSelectedCount.setText(selectedCount + " selected");
         btnSelect.setEnabled(selectedCount > 0);
-        btnSelect.setText(selectedCount > 0 ? "Select " + selectedCount + " Photos" : "Select Photos");
+        
+        if (selectedCount > 0) {
+            // Primary button style when photos are selected
+            btnSelect.setText("Select " + selectedCount + " Photos");
+            btnSelect.setBackgroundResource(R.drawable.primary_button_background);
+            btnSelect.setTextColor(android.graphics.Color.parseColor("#f8fafc")); // text-primary-foreground
+        } else {
+            // Secondary button style when no photos are selected
+            btnSelect.setText("Select Photos");
+            btnSelect.setBackgroundResource(R.drawable.secondary_button_background);
+            btnSelect.setTextColor(android.graphics.Color.parseColor("#020817")); // text-foreground
+        }
     }
 
     private void processSelectedPhotos(List<PhotoItem> selectedPhotos) {
@@ -444,7 +466,7 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
                 }
                 
                 details.append("🎉 Upload process complete!\n");
-                details.append("View photos at: https://photo-share.app/event/").append(eventId);
+                details.append("View photos at: https://photoshare.ai/event/").append(eventId);
             } else {
                 details.append("❌ Cannot upload: API connection failed\n");
                 details.append("Please check your internet connection and PhotoShare login.");
@@ -915,6 +937,25 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
     }
     
     private void showUploadProgressDialog(int totalPhotos) {
+        // Use new overlay instead of AlertDialog
+        if (uploadOverlay == null) {
+            uploadOverlay = UploadProgressOverlay.getInstance();
+        }
+        
+        // Show scanning state first
+        uploadOverlay.showScanningOverlay(this, "Preparing Photos", "Scanning " + totalPhotos + " photos for upload");
+        
+        // Transition to upload state after a delay
+        new android.os.Handler().postDelayed(() -> {
+            if (uploadOverlay != null && currentSelectedPhotos != null) {
+                // showOverlay expects (Activity, String queueId, int photoCount, String eventName)
+                uploadOverlay.showOverlay(this, "upload_" + System.currentTimeMillis(), currentSelectedPhotos.size(), eventName);
+            }
+        }, 2000);
+        
+        return;
+        
+        /* OLD AlertDialog code - keeping for reference
         // Create progress dialog
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("📤 Uploading Photos");
@@ -956,17 +997,21 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
         
         // Store dialog reference for updates
         uploadProgressDialog = dialog;
+        */
     }
     
     private AlertDialog uploadProgressDialog;
     private int uploadedCount = 0;
     private int totalUploadCount = 0;
+    private UploadProgressOverlay uploadOverlay;
+    private LinearLayout simpleUploadOverlay;
     
     private void startPhotoUpload(List<PhotoItem> selectedPhotos) {
         Log.d(TAG, "🚀 Starting upload process for " + selectedPhotos.size() + " photos");
         
         totalUploadCount = selectedPhotos.size();
         uploadedCount = 0;
+        currentSelectedPhotos = selectedPhotos; // Store for overlay
         
         // Get JWT token from Intent extras (passed from EventPhotoPickerPlugin)
         Log.d(TAG, "🔄 Getting JWT token from Intent extras...");
@@ -1063,6 +1108,13 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
     
     private void updateUploadProgress(int current, int total, String fileName) {
         runOnUiThread(() -> {
+            // Use overlay for progress updates
+            if (uploadOverlay != null && currentSelectedPhotos != null && current > 0 && current <= currentSelectedPhotos.size()) {
+                PhotoItem currentPhoto = currentSelectedPhotos.get(current - 1);
+                uploadOverlay.updatePhotoProgress(this, "upload_queue", currentPhoto.getUri().toString(), 100); // Mark as complete
+            }
+            
+            // Keep AlertDialog code as fallback
             if (uploadProgressDialog != null) {
                 uploadProgressDialog.setMessage("Uploading " + current + "/" + total + "\n" + fileName);
             }
@@ -1071,23 +1123,41 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
     
     private void showUploadComplete() {
         runOnUiThread(() -> {
-            if (uploadProgressDialog != null) {
-                uploadProgressDialog.dismiss();
+            // Use overlay for completion
+            if (uploadOverlay != null) {
+                uploadOverlay.showCompleteOverlay(this, uploadedCount, 0);
+                // Auto-hide and finish after delay
+                new android.os.Handler().postDelayed(() -> {
+                    if (uploadOverlay != null) {
+                        uploadOverlay.hideOverlay();
+                    }
+                    finish(); // Close EventPhotoPicker
+                }, 3000);
+            } else {
+                // Fallback to AlertDialog
+                if (uploadProgressDialog != null) {
+                    uploadProgressDialog.dismiss();
+                }
+                
+                AlertDialog.Builder builder = new AlertDialog.Builder(this);
+                builder.setTitle("✅ Upload Complete");
+                builder.setMessage("Successfully uploaded " + uploadedCount + " photos to " + eventName);
+                builder.setPositiveButton("OK", (dialog, which) -> {
+                    dialog.dismiss();
+                    finish(); // Close EventPhotoPicker
+                });
+                builder.show();
             }
-            
-            AlertDialog.Builder builder = new AlertDialog.Builder(this);
-            builder.setTitle("✅ Upload Complete");
-            builder.setMessage("Successfully uploaded " + uploadedCount + " photos to " + eventName);
-            builder.setPositiveButton("OK", (dialog, which) -> {
-                dialog.dismiss();
-                finish(); // Close EventPhotoPicker
-            });
-            builder.show();
         });
     }
     
     private void showUploadError(String message) {
         runOnUiThread(() -> {
+            // Hide overlay first
+            if (uploadOverlay != null) {
+                uploadOverlay.hideOverlay();
+            }
+            
             if (uploadProgressDialog != null) {
                 uploadProgressDialog.dismiss();
             }
@@ -1182,7 +1252,7 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
             // Extract clean event ID from full URL if needed
             String cleanEventId = eventId;
             if (eventId != null && eventId.contains("/event/")) {
-                // Extract just the event ID part from URLs like "https://photo-share.app/event/6724e0bb1f5d6e4ef71e"
+                // Extract just the event ID part from URLs like "https://photoshare.ai/event/6724e0bb1f5d6e4ef71e"
                 int eventIndex = eventId.lastIndexOf("/event/");
                 if (eventIndex != -1) {
                     cleanEventId = eventId.substring(eventIndex + 7); // Skip "/event/"
@@ -1579,23 +1649,243 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
     
     /**
      * Show upload overlay immediately for instant feedback when user clicks "Select Photos" button
+     * Uses the same overlay system as auto upload for consistency
      */
-    private void showUploadOverlayImmediately(int photoCount) {
+    private void showUploadOverlayImmediately(int photoCount, List<PhotoItem> selectedPhotos) {
         Log.d(TAG, "🚀 Showing upload overlay immediately for " + photoCount + " photos");
         
-        // Show the overlay that's already in the layout
+        // CRITICAL: Hide the activity's built-in overlay to prevent conflicts
         View loadingOverlay = findViewById(R.id.loading_overlay);
-        TextView loadingText = findViewById(R.id.loading_text);
-        
         if (loadingOverlay != null) {
-            loadingOverlay.setVisibility(View.VISIBLE);
+            loadingOverlay.setVisibility(View.GONE);
+            Log.d(TAG, "🔧 Hidden activity loading overlay to prevent conflicts");
         }
         
-        if (loadingText != null) {
-            loadingText.setText("Uploading " + photoCount + " photos...");
+        // CRITICAL: Use simple overlay system like auto upload instead of complex UploadProgressOverlay
+        createSimpleUploadOverlay(photoCount, selectedPhotos);
+        Log.d(TAG, "✅ Simple upload overlay shown immediately with proper bottom positioning!");
+    }
+    
+    /**
+     * Create upload overlay matching the exact auto upload UI design
+     * Shows: thumbnail, "Uploading 1/N", filename, close button
+     */
+    private void createSimpleUploadOverlay(int photoCount, List<PhotoItem> selectedPhotos) {
+        // Remove existing overlay if present
+        removeSimpleUploadOverlay();
+        
+        // Get the main activity's content view
+        ViewGroup contentView = (ViewGroup) findViewById(android.R.id.content);
+        
+        // Create overlay container with modern bottom-sheet design
+        simpleUploadOverlay = new LinearLayout(this);
+        
+        // Position at bottom of screen
+        FrameLayout.LayoutParams overlayParams = new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        overlayParams.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+        simpleUploadOverlay.setLayoutParams(overlayParams);
+        
+        // Modern background with rounded top corners
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(Color.parseColor("#ffffff"));
+        background.setCornerRadii(new float[]{24, 24, 24, 24, 0, 0, 0, 0});
+        
+        // Top border
+        GradientDrawable topBorder = new GradientDrawable();
+        topBorder.setColor(Color.parseColor("#e2e8f0"));
+        topBorder.setSize(0, 1);
+        
+        LayerDrawable layerDrawable = new LayerDrawable(new android.graphics.drawable.Drawable[]{topBorder, background});
+        layerDrawable.setLayerInset(1, 0, 1, 0, 0);
+        simpleUploadOverlay.setBackground(layerDrawable);
+        simpleUploadOverlay.setElevation(8f);
+        simpleUploadOverlay.setOrientation(LinearLayout.VERTICAL);
+        simpleUploadOverlay.setPadding(dpToPx(20), dpToPx(20), dpToPx(20), dpToPx(20));
+        
+        // Create frame container for main content and close button overlay (like auto upload)
+        FrameLayout frameContainer = new FrameLayout(this);
+        frameContainer.setLayoutParams(new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+        
+        // Create main content container (horizontal layout with thumbnail + text)
+        LinearLayout contentContainer = new LinearLayout(this);
+        contentContainer.setOrientation(LinearLayout.HORIZONTAL);
+        contentContainer.setGravity(Gravity.CENTER_VERTICAL);
+        
+        // Add thumbnail (64x64 dp like auto upload)
+        ImageView thumbnail = new ImageView(this);
+        LinearLayout.LayoutParams thumbParams = new LinearLayout.LayoutParams(dpToPx(64), dpToPx(64));
+        thumbParams.rightMargin = dpToPx(16);
+        thumbnail.setLayoutParams(thumbParams);
+        thumbnail.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        
+        // Set placeholder or first photo thumbnail
+        if (selectedPhotos != null && !selectedPhotos.isEmpty()) {
+            loadThumbnailAsync(thumbnail, selectedPhotos.get(0).getUri());
+        } else {
+            // Placeholder gray background
+            thumbnail.setBackgroundColor(Color.parseColor("#f3f4f6"));
         }
         
-        Log.d(TAG, "✅ Upload overlay shown immediately - no delay!");
+        // Create text container (vertical layout)
+        LinearLayout textContainer = new LinearLayout(this);
+        textContainer.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
+        textContainer.setLayoutParams(textParams);
+        
+        // Main progress text: "Uploading 1/N"
+        TextView progressText = new TextView(this);
+        progressText.setText("Uploading 1/" + photoCount);
+        progressText.setTextColor(Color.parseColor("#212121"));
+        progressText.setTextSize(16);
+        progressText.setTypeface(null, android.graphics.Typeface.BOLD);
+        
+        // Filename text
+        TextView filenameText = new TextView(this);
+        if (selectedPhotos != null && !selectedPhotos.isEmpty()) {
+            filenameText.setText(getFilenameFromUri(selectedPhotos.get(0).getUri()));
+        } else {
+            filenameText.setText("Preparing photos...");
+        }
+        filenameText.setTextColor(Color.parseColor("#757575"));
+        filenameText.setTextSize(14);
+        filenameText.setSingleLine(true);
+        
+        // Add progress bar (like auto upload) with two-color design
+        ProgressBar progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        progressParams.topMargin = dpToPx(8);
+        progressBar.setLayoutParams(progressParams);
+        progressBar.setMax(photoCount);
+        progressBar.setProgress(1); // Show as "uploading first photo"
+        
+        // Set modern two-color design for progress bar
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+            progressBar.setProgressTintList(android.content.res.ColorStateList.valueOf(Color.parseColor("#3b82f6"))); // Blue progress
+            progressBar.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.parseColor("#e2e8f0"))); // Light gray background
+        }
+        
+        textContainer.addView(progressText);
+        textContainer.addView(filenameText);
+        textContainer.addView(progressBar);
+        
+        contentContainer.addView(thumbnail);
+        contentContainer.addView(textContainer);
+        
+        // Add close button (positioned at top-right like auto upload)
+        TextView closeButton = new TextView(this);
+        closeButton.setText("×");
+        closeButton.setTextColor(Color.parseColor("#212121"));
+        closeButton.setTextSize(18);
+        closeButton.setBackgroundColor(Color.TRANSPARENT);
+        closeButton.setPadding(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(8));
+        closeButton.setGravity(Gravity.CENTER);
+        
+        FrameLayout.LayoutParams closeParams = new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        closeParams.gravity = Gravity.TOP | Gravity.END;
+        closeButton.setLayoutParams(closeParams);
+        
+        // Close button click handler
+        closeButton.setOnClickListener(v -> {
+            Log.d(TAG, "🚫 User closed upload overlay");
+            removeSimpleUploadOverlay();
+        });
+        
+        // Add content and close button to frame
+        frameContainer.addView(contentContainer);
+        frameContainer.addView(closeButton);
+        
+        // Add frame to main overlay
+        simpleUploadOverlay.addView(frameContainer);
+        
+        // Add overlay to activity
+        contentView.addView(simpleUploadOverlay);
+        
+        Log.d(TAG, "✅ Auto upload style overlay created successfully");
+    }
+    
+    /**
+     * Remove the simple upload overlay
+     */
+    private void removeSimpleUploadOverlay() {
+        if (simpleUploadOverlay != null) {
+            try {
+                ViewGroup parent = (ViewGroup) simpleUploadOverlay.getParent();
+                if (parent != null) {
+                    parent.removeView(simpleUploadOverlay);
+                }
+                simpleUploadOverlay = null;
+                Log.d(TAG, "🗑️ Simple upload overlay removed");
+            } catch (Exception e) {
+                Log.e(TAG, "❌ Error removing simple upload overlay: " + e.getMessage());
+            }
+        }
+    }
+    
+    /**
+     * Convert dp to pixels
+     */
+    private int dpToPx(int dp) {
+        return (int) (dp * getResources().getDisplayMetrics().density);
+    }
+    
+    /**
+     * Load thumbnail asynchronously for the overlay
+     */
+    private void loadThumbnailAsync(ImageView imageView, Uri uri) {
+        new Thread(() -> {
+            try {
+                // Try to load bitmap directly from URI
+                InputStream inputStream = getContentResolver().openInputStream(uri);
+                if (inputStream != null) {
+                    BitmapFactory.Options options = new BitmapFactory.Options();
+                    options.inSampleSize = 4; // Scale down for thumbnail
+                    Bitmap thumbnail = BitmapFactory.decodeStream(inputStream, null, options);
+                    inputStream.close();
+                    
+                    runOnUiThread(() -> {
+                        if (thumbnail != null) {
+                            imageView.setImageBitmap(thumbnail);
+                            imageView.setBackgroundColor(Color.TRANSPARENT); // Remove placeholder
+                        }
+                    });
+                }
+            } catch (Exception e) {
+                Log.d(TAG, "Could not load thumbnail: " + e.getMessage());
+                // Keep placeholder background
+            }
+        }).start();
+    }
+    
+    /**
+     * Get filename from URI
+     */
+    private String getFilenameFromUri(Uri uri) {
+        String filename = "photo.jpg";
+        try {
+            Cursor cursor = getContentResolver().query(uri, new String[]{MediaStore.Images.Media.DISPLAY_NAME}, null, null, null);
+            if (cursor != null && cursor.moveToFirst()) {
+                int nameIndex = cursor.getColumnIndex(MediaStore.Images.Media.DISPLAY_NAME);
+                if (nameIndex >= 0) {
+                    filename = cursor.getString(nameIndex);
+                }
+                cursor.close();
+            }
+        } catch (Exception e) {
+            Log.d(TAG, "Could not get filename: " + e.getMessage());
+        }
+        return filename;
     }
     
     /**
@@ -1677,6 +1967,14 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
     protected void onDestroy() {
         super.onDestroy();
         
+        // Clean up overlays
+        if (uploadOverlay != null) {
+            uploadOverlay.hideOverlay();
+            uploadOverlay = null;
+        }
+        
+        removeSimpleUploadOverlay();
+        
         // Dismiss any open dialogs to prevent window leaks
         if (uploadProgressDialog != null && uploadProgressDialog.isShowing()) {
             uploadProgressDialog.dismiss();
@@ -1685,5 +1983,52 @@ public class EventPhotoPickerActivity extends AppCompatActivity implements Photo
         
         // Clear static duplicate detector reference to prevent memory leaks
         clearDuplicateDetector();
+    }
+    
+    /**
+     * Configure status bar to not overlay content (matching MainActivity approach)
+     */
+    private void configureStatusBar() {
+        Log.d(TAG, "🎨 Configuring status bar with proper padding");
+        
+        // Make status bar visible with proper padding
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            getWindow().setStatusBarColor(getResources().getColor(android.R.color.white));
+            getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+            );
+        }
+        
+        // Apply WindowInsets listener for proper padding
+        View rootView = findViewById(android.R.id.content);
+        if (rootView != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            rootView.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
+                @Override
+                public android.view.WindowInsets onApplyWindowInsets(View v, android.view.WindowInsets insets) {
+                    int statusBarHeight = insets.getSystemWindowInsetTop();
+                    Log.d(TAG, "📏 WindowInsets - Status bar: " + statusBarHeight + "px");
+                    
+                    // Apply padding to the root content view
+                    v.setPadding(0, statusBarHeight, 0, 0);
+                    
+                    // Consume the insets so they're not applied again
+                    return insets.consumeSystemWindowInsets();
+                }
+            });
+            
+            // Request a layout pass to apply the insets
+            rootView.requestApplyInsets();
+        } else {
+            // Fallback for older Android versions
+            int statusBarHeight = 0;
+            int resourceId = getResources().getIdentifier("status_bar_height", "dimen", "android");
+            if (resourceId > 0) {
+                statusBarHeight = getResources().getDimensionPixelSize(resourceId);
+            }
+            if (rootView != null) {
+                rootView.setPadding(0, statusBarHeight, 0, 0);
+            }
+            Log.d(TAG, "✅ Applied fallback padding: " + statusBarHeight + "px");
+        }
     }
 }

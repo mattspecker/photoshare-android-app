@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- PhotoShare Brand Colors -->
+    <color name="photoshare_primary">#2B8FFF</color>
+    <color name="photoshare_success_green">#22C55E</color>
+    
+    <!-- Icon backgrounds (10% alpha) -->
+    <color name="photoshare_primary_10_alpha">#1A2B8FFF</color>
+    <color name="photoshare_success_10_alpha">#1A22C55E</color>
+    
+    <!-- Overlay colors -->
+    <color name="photoshare_surface">#FFFFFF</color>
+    <color name="photoshare_surface_dark">#1a1d29</color>
+    <color name="photoshare_on_surface">#000000</color>
+    <color name="photoshare_on_surface_variant">#666666</color>
+    <color name="photoshare_surface_variant">#F0F0F0</color>
+    <color name="photoshare_outline_12_alpha">#1F000000</color>
+    
+    <!-- Text colors -->
+    <color name="photoshare_text_primary">#000000</color>
+    <color name="photoshare_text_secondary">#666666</color>
+    <color name="photoshare_text_muted">#999999</color>
+    
+    <!-- Old orange accent (for compatibility) -->
+    <color name="photoshare_orange_accent">#ff6b35</color>
+</resources>

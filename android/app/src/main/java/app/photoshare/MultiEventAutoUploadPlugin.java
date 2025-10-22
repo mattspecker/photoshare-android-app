@@ -14,14 +14,17 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
 import android.util.Log;
+import android.util.TypedValue;
 import androidx.core.content.ContextCompat;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.graphics.PorterDuff;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.view.animation.Animation;
@@ -95,9 +98,20 @@ public class MultiEventAutoUploadPlugin extends Plugin {
     private TextView uploadStatusText = null;
     private TextView photoNameText = null;
     
+    // Main UI elements for state management
+    private TextView mainText = null;
+    private TextView secondaryText = null;
+    private ImageView iconImage = null;
+    private FrameLayout iconContainer = null;
+    
     // Upload tracking
     private UploadApiClient uploadApiClient = null;
     private int totalUploadedPhotos = 0;
+    
+    // Upload summary tracking for completion screen
+    private int uploadedCount = 0;
+    private int duplicatesCount = 0;
+    private int failedCount = 0;
     private static final String SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpnZmNmZGxmY25tYXJpcGdwZXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI1NDM2MjgsImV4cCI6MjA2ODExOTYyOH0.OmkqPDJM8-BKLDo5WxsL8Nop03XxAaygNaToOMKkzGY";
     
     // App lifecycle tracking (removed - should work on any resume)
@@ -121,35 +135,57 @@ public class MultiEventAutoUploadPlugin extends Plugin {
         
         Log.d(TAG, "📱 App resumed - checking if auto-upload should run");
         
-        // Check if enough time has passed since last auto-upload check (only if we've run before)
-        long currentTime = System.currentTimeMillis();
-        long timeSinceLastCheck = currentTime - lastAutoUploadCheck;
-        
-        if (lastAutoUploadCheck > 0 && timeSinceLastCheck < AUTO_UPLOAD_THROTTLE_MS) {
-            long remainingMinutes = (AUTO_UPLOAD_THROTTLE_MS - timeSinceLastCheck) / (60 * 1000);
-            Log.d(TAG, "⏰ Auto-upload throttled - " + remainingMinutes + " minutes remaining");
-            return;
-        }
-        
-        // Check if we have user context and auto-upload is potentially enabled
+        // Check if we have user context first
         if (currentUserId == null) {
             Log.d(TAG, "👤 No user context available - skipping auto-upload");
             return;
         }
         
-        if (!autoUploadEnabled) {
-            Log.d(TAG, "⏸️ Auto-upload disabled - skipping");
-            return;
-        }
-        
-        Log.d(TAG, "🔄 Triggering auto-upload check on app resume...");
-        lastAutoUploadCheck = currentTime;
-        
-        // Delay overlay creation to ensure WebView content is loaded and user is authenticated
+        // Use iOS-style approach: Give page time to initialize, then check localStorage directly
+        Log.d(TAG, "⏳ Giving page time to initialize...");
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
-            Log.d(TAG, "⏰ Delayed trigger - checking auth state before auto-upload");
-            checkAuthStateAndTriggerAutoUpload();
-        }, 5000); // 5 second delay to let WebView finish loading (iOS uses 15s total timeout with polling)
+            checkAutoUploadSettingsAfterDelay();
+        }, 5000); // 5 second delay to ensure web app is fully loaded
+    }
+    
+    /**
+     * Check auto-upload settings after iOS-style delay (simplified approach)
+     */
+    private void checkAutoUploadSettingsAfterDelay() {
+        Log.d(TAG, "⚙️ Checking global auto-upload settings (iOS-style)...");
+        
+        // Skip the readiness check - just try to read settings directly
+        // If they're not available, we'll get false anyway
+        // This matches iOS behavior more closely
+        
+        // Check web settings directly (like iOS getGlobalAutoUploadSettings)
+        getWebAutoUploadSettingsAsync(currentUserId, (webAutoUploadEnabled) -> {
+            if (!webAutoUploadEnabled) {
+                Log.d(TAG, "⏸️ Auto-upload is DISABLED in web settings - skipping entirely");
+                return;
+            }
+            
+            Log.d(TAG, "✅ Auto-upload is ENABLED in web settings - checking throttle...");
+            
+            // Now check throttling (only if auto-upload is enabled)
+            long currentTime = System.currentTimeMillis();
+            long timeSinceLastCheck = currentTime - lastAutoUploadCheck;
+            
+            if (lastAutoUploadCheck > 0 && timeSinceLastCheck < AUTO_UPLOAD_THROTTLE_MS) {
+                long remainingMinutes = (AUTO_UPLOAD_THROTTLE_MS - timeSinceLastCheck) / (60 * 1000);
+                Log.d(TAG, "⏰ Auto-upload throttled - " + remainingMinutes + " minutes remaining");
+                return;
+            }
+            
+            Log.d(TAG, "🔄 Triggering auto-upload check...");
+            lastAutoUploadCheck = currentTime;
+            
+            // Follow iOS pattern: wait for auth bridge, then proceed
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                Log.d(TAG, "⏰ Delayed trigger - checking auth state before auto-upload");
+                checkAuthStateAndTriggerAutoUpload();
+            }, 1000); // 1 second delay like iOS
+        });
     }
     
     /**
@@ -158,11 +194,29 @@ public class MultiEventAutoUploadPlugin extends Plugin {
     private void checkAuthStateAndTriggerAutoUpload() {
         Log.d(TAG, "🔐 Checking authentication state before auto-upload...");
         
-        // CRITICAL: Check Permission Gate before proceeding
-        if (!checkPermissionGateWithRetry()) {
-            Log.d(TAG, "⛔ Auth-triggered auto-upload blocked by Permission Gate - user needs to complete onboarding");
-            return;
-        }
+        // CRITICAL: Move Permission Gate check to background thread to prevent ANR
+        java.util.concurrent.CompletableFuture.runAsync(() -> {
+            try {
+                // CRITICAL: Check Permission Gate in background thread
+                if (!checkPermissionGateWithRetry()) {
+                    Log.d(TAG, "⛔ Auth-triggered auto-upload blocked by Permission Gate - user needs to complete onboarding");
+                    return;
+                }
+                
+                // Continue with auth check on main thread
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    continueAuthStateCheck();
+                });
+            } catch (Exception e) {
+                Log.e(TAG, "❌ Error checking Permission Gate in auth flow: " + e.getMessage(), e);
+            }
+        });
+    }
+    
+    /**
+     * Continue authentication check after Permission Gate validation
+     */
+    private void continueAuthStateCheck() {
         
         // JavaScript to check if user is authenticated
         String authCheckJs = 
@@ -629,15 +683,49 @@ public class MultiEventAutoUploadPlugin extends Plugin {
         try {
             Log.d(TAG, "🚀 Starting multi-event auto-upload check");
             
-            // CRITICAL: Check Permission Gate before proceeding
-            if (!checkPermissionGateWithRetry()) {
-                Log.d(TAG, "⛔ Auto-upload blocked by Permission Gate - user needs to complete onboarding");
-                JSObject result = new JSObject();
-                result.put("blocked", true);
-                result.put("reason", "permissions_pending");
-                call.resolve(result);
-                return;
-            }
+            // CRITICAL: Move Permission Gate check to background thread to prevent ANR
+            java.util.concurrent.CompletableFuture.runAsync(() -> {
+                try {
+                    // CRITICAL: Check Permission Gate in background thread
+                    if (!checkPermissionGateWithRetry()) {
+                        Log.d(TAG, "⛔ Auto-upload blocked by Permission Gate - user needs to complete onboarding");
+                        new Handler(Looper.getMainLooper()).post(() -> {
+                            JSObject result = new JSObject();
+                            result.put("blocked", true);
+                            result.put("reason", "permissions_pending");
+                            call.resolve(result);
+                        });
+                        return;
+                    }
+                    
+                    // Continue with permission check on main thread
+                    new Handler(Looper.getMainLooper()).post(() -> {
+                        continueCheckAllEventsForPhotos(call);
+                    });
+                } catch (Exception e) {
+                    Log.e(TAG, "❌ Error checking Permission Gate in multi-event flow: " + e.getMessage(), e);
+                    new Handler(Looper.getMainLooper()).post(() -> {
+                        JSObject result = new JSObject();
+                        result.put("error", true);
+                        result.put("message", "Permission check failed");
+                        call.resolve(result);
+                    });
+                }
+            });
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error in checkAllEventsForPhotos: " + e.getMessage(), e);
+            JSObject result = new JSObject();
+            result.put("error", true);
+            result.put("message", e.getMessage());
+            call.resolve(result);
+        }
+    }
+    
+    /**
+     * Continue multi-event check after Permission Gate validation
+     */
+    private void continueCheckAllEventsForPhotos(PluginCall call) {
+        try {
             
             // CRITICAL: Check actual photo permission before proceeding
             if (!hasActualPhotoPermission()) {
@@ -771,27 +859,19 @@ public class MultiEventAutoUploadPlugin extends Plugin {
             int totalEvents = events.length();
             int eventsWithAutoUpload = 0;
             
-            Log.d(TAG, "🔍 Checking " + totalEvents + " events for auto-upload settings...");
+            Log.d(TAG, "🔍 Processing " + totalEvents + " events (global auto-upload enabled)...");
             
             for (int i = 0; i < totalEvents; i++) {
                 JSONObject event = events.getJSONObject(i);
                 String eventId = event.optString("event_id", "unknown");
                 String eventName = event.optString("name", "Untitled Event");
                 
-                // Check if this event has auto-upload enabled (defaulting to true for now)
-                // TODO: API needs to include auto_upload_enabled field per event
-                boolean eventAutoUpload = event.optBoolean("auto_upload_enabled", true);
+                Log.d(TAG, String.format("📋 Event %d/%d: %s (ID: %s)", 
+                    i + 1, totalEvents, eventName, eventId));
                 
-                Log.d(TAG, String.format("📋 Event %d/%d: %s (ID: %s) - Auto-upload: %s", 
-                    i + 1, totalEvents, eventName, eventId, eventAutoUpload ? "✅ ENABLED" : "❌ DISABLED"));
-                
-                if (eventAutoUpload) {
-                    eventsWithAutoUpload++;
-                    // TODO: Check for new photos in this event
-                    Log.d(TAG, "   🔄 Would check photos for: " + eventName);
-                } else {
-                    Log.d(TAG, "   ⏸️ Skipping (auto-upload disabled): " + eventName);
-                }
+                // All events are processed (no per-event auto-upload check needed)
+                eventsWithAutoUpload++;
+                Log.d(TAG, "   🔄 Will check photos for: " + eventName);
             }
             
             Log.d(TAG, String.format("✅ Event scan complete: %d/%d events have auto-upload enabled", 
@@ -1072,11 +1152,29 @@ public class MultiEventAutoUploadPlugin extends Plugin {
     private void triggerAutoUploadWithOverlay() {
         Log.d(TAG, "🎨 Creating native auto-upload overlay...");
         
-        // CRITICAL: Check Permission Gate before proceeding
-        if (!checkPermissionGateWithRetry()) {
-            Log.d(TAG, "⛔ Overlay-triggered auto-upload blocked by Permission Gate - user needs to complete onboarding");
-            return;
-        }
+        // CRITICAL: Move Permission Gate check to background thread to prevent ANR
+        java.util.concurrent.CompletableFuture.runAsync(() -> {
+            try {
+                // CRITICAL: Check Permission Gate in background thread
+                if (!checkPermissionGateWithRetry()) {
+                    Log.d(TAG, "⛔ Overlay-triggered auto-upload blocked by Permission Gate - user needs to complete onboarding");
+                    return;
+                }
+                
+                // Continue with overlay creation on main thread
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    continueOverlayAutoUpload();
+                });
+            } catch (Exception e) {
+                Log.e(TAG, "❌ Error checking Permission Gate in overlay flow: " + e.getMessage(), e);
+            }
+        });
+    }
+    
+    /**
+     * Continue overlay auto-upload after Permission Gate validation
+     */
+    private void continueOverlayAutoUpload() {
         
         // CRITICAL: Check actual photo permission before proceeding
         if (!hasActualPhotoPermission()) {
@@ -1099,22 +1197,50 @@ public class MultiEventAutoUploadPlugin extends Plugin {
      * Trigger auto-upload with overlay using pre-extracted user ID and access token
      */
     private void triggerAutoUploadWithTokens(String userId, String accessToken) {
-        Log.d(TAG, "🎨 Creating native auto-upload overlay with pre-extracted tokens...");
+        Log.d(TAG, "🔍 Checking web settings before auto-upload overlay...");
         
-        // CRITICAL: Check Permission Gate before proceeding
-        if (!checkPermissionGateWithRetry()) {
-            Log.d(TAG, "⛔ Token-triggered auto-upload blocked by Permission Gate - user needs to complete onboarding");
-            return;
-        }
-        
-        // Must run on UI thread
-        new Handler(Looper.getMainLooper()).post(() -> {
+        // CRITICAL: Move Permission Gate check to background thread to prevent ANR
+        java.util.concurrent.CompletableFuture.runAsync(() -> {
             try {
-                createNativeOverlay();
-                startAutoUploadProcessWithTokens(userId, accessToken);
+                // CRITICAL: Check Permission Gate in background thread
+                if (!checkPermissionGateWithRetry()) {
+                    Log.d(TAG, "⛔ Token-triggered auto-upload blocked by Permission Gate - user needs to complete onboarding");
+                    return;
+                }
+                
+                // Continue with token-based auto-upload on main thread
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    continueTokenAutoUpload(userId, accessToken);
+                });
             } catch (Exception e) {
-                Log.e(TAG, "❌ Error creating native overlay: " + e.getMessage(), e);
+                Log.e(TAG, "❌ Error checking Permission Gate in token flow: " + e.getMessage(), e);
             }
+        });
+    }
+    
+    /**
+     * Continue token-based auto-upload after Permission Gate validation
+     */
+    private void continueTokenAutoUpload(String userId, String accessToken) {
+        
+        // Check web settings BEFORE showing overlay (asynchronously)
+        getWebAutoUploadSettingsAsync(userId, (webAutoUploadEnabled) -> {
+            if (!webAutoUploadEnabled) {
+                Log.d(TAG, "⏸️ Auto-upload is DISABLED in web settings - skipping overlay entirely");
+                return;
+            }
+            
+            Log.d(TAG, "✅ Auto-upload is ENABLED in web settings - proceeding with overlay");
+            
+            // Must run on UI thread
+            new Handler(Looper.getMainLooper()).post(() -> {
+                try {
+                    createNativeOverlay();
+                    startAutoUploadProcessWithTokens(userId, accessToken);
+                } catch (Exception e) {
+                    Log.e(TAG, "❌ Error creating native overlay: " + e.getMessage(), e);
+                }
+            });
         });
     }
     
@@ -1128,34 +1254,96 @@ public class MultiEventAutoUploadPlugin extends Plugin {
         // Get the main activity's content view
         ViewGroup contentView = (ViewGroup) getActivity().findViewById(android.R.id.content);
         
-        // Create overlay container
+        // Create overlay container with modern bottom-sheet design
         nativeOverlay = new LinearLayout(getContext());
-        nativeOverlay.setLayoutParams(new ViewGroup.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, 
-            (int) (160 * getContext().getResources().getDisplayMetrics().density) // 160dp - taller for thumbnail
-        ));
-        nativeOverlay.setBackgroundColor(Color.parseColor("#E6000000")); // Darker background (90% opacity)
-        nativeOverlay.setOrientation(LinearLayout.VERTICAL); // Changed to vertical to stack content
-        nativeOverlay.setGravity(Gravity.CENTER);
-        nativeOverlay.setPadding(32, 16, 32, 16);
         
-        // Create horizontal container for main content and close button
-        LinearLayout horizontalContainer = new LinearLayout(getContext());
-        horizontalContainer.setOrientation(LinearLayout.HORIZONTAL);
-        horizontalContainer.setGravity(Gravity.CENTER_VERTICAL);
-        horizontalContainer.setLayoutParams(new LinearLayout.LayoutParams(
+        // Position at bottom of screen
+        FrameLayout.LayoutParams overlayParams = new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        overlayParams.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+        nativeOverlay.setLayoutParams(overlayParams);
+        
+        // Modern background with rounded top corners and top border
+        // Create main background with rounded top corners
+        android.graphics.drawable.GradientDrawable backgroundDrawable = new android.graphics.drawable.GradientDrawable();
+        backgroundDrawable.setColor(Color.WHITE);
+        backgroundDrawable.setCornerRadii(new float[]{
+            dpToPx(12), dpToPx(12), // Top left radius (.75rem = 12dp)
+            dpToPx(12), dpToPx(12), // Top right radius (.75rem = 12dp)
+            0, 0,                   // Bottom right radius (0)
+            0, 0                    // Bottom left radius (0)
+        });
+        
+        // Create top border drawable
+        android.graphics.drawable.GradientDrawable topBorderDrawable = new android.graphics.drawable.GradientDrawable();
+        topBorderDrawable.setColor(Color.parseColor("#e2e8f0"));
+        topBorderDrawable.setCornerRadii(new float[]{
+            dpToPx(12), dpToPx(12), // Match top corner radius
+            dpToPx(12), dpToPx(12), // Match top corner radius
+            0, 0, 0, 0              // No bottom corners
+        });
+        
+        // Layer the border on top of background
+        android.graphics.drawable.LayerDrawable layerDrawable = new android.graphics.drawable.LayerDrawable(
+            new android.graphics.drawable.Drawable[]{topBorderDrawable, backgroundDrawable}
+        );
+        layerDrawable.setLayerInset(1, 0, dpToPx(1), 0, 0); // Inset background by 1px from top
+        nativeOverlay.setBackground(layerDrawable);
+        nativeOverlay.setElevation(8f);
+        nativeOverlay.setOrientation(LinearLayout.VERTICAL);
+        nativeOverlay.setPadding(dpToPx(20), dpToPx(20), dpToPx(20), dpToPx(20));
+        nativeOverlay.setMinimumHeight(dpToPx(100));
+        
+        // Create frame container for main content and close button overlay
+        FrameLayout frameContainer = new FrameLayout(getContext());
+        frameContainer.setLayoutParams(new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
         ));
         
-        // Create main content container (thumbnail on left, text+progress on right)
+        // Create main content container with icon + text design (like UploadProgressOverlay)
         LinearLayout contentContainer = new LinearLayout(getContext());
-        contentContainer.setOrientation(LinearLayout.HORIZONTAL); // Changed to horizontal for side-by-side layout
+        contentContainer.setOrientation(LinearLayout.HORIZONTAL);
         contentContainer.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams contentParams = new LinearLayout.LayoutParams(
-            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f
+        FrameLayout.LayoutParams contentParams = new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT
         );
+        contentParams.setMargins(0, 0, dpToPx(40), 0); // Right margin to avoid close button
         contentContainer.setLayoutParams(contentParams);
+        
+        // Add icon container (64dp x 64dp) instead of thumbnail
+        iconContainer = new FrameLayout(getContext());
+        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(
+            dpToPx(64), dpToPx(64)
+        );
+        iconParams.setMargins(0, 0, dpToPx(16), 0);
+        iconContainer.setLayoutParams(iconParams);
+        
+        // Set background drawable (need to create this)
+        try {
+            iconContainer.setBackgroundResource(R.drawable.icon_background_blue);
+        } catch (Exception e) {
+            iconContainer.setBackgroundColor(Color.parseColor("#E3F2FD")); // Light blue fallback
+        }
+        
+        // Add upload icon
+        iconImage = new ImageView(getContext());
+        try {
+            iconImage.setImageResource(android.R.drawable.stat_sys_download); // Download icon for "Getting Events"
+        } catch (Exception e) {
+            iconImage.setImageResource(android.R.drawable.ic_menu_info_details); // Fallback
+        }
+        iconImage.setColorFilter(Color.parseColor("#2B8FFF"), PorterDuff.Mode.SRC_IN);
+        FrameLayout.LayoutParams iconImageParams = new FrameLayout.LayoutParams(
+            dpToPx(32), dpToPx(32)
+        );
+        iconImageParams.gravity = Gravity.CENTER;
+        iconImage.setLayoutParams(iconImageParams);
+        iconContainer.addView(iconImage);
+        
+        contentContainer.addView(iconContainer);
         
         // Create thumbnail container (left side)
         LinearLayout thumbnailContainer = new LinearLayout(getContext());
@@ -1176,34 +1364,79 @@ public class MultiEventAutoUploadPlugin extends Plugin {
         );
         textProgressContainer.setLayoutParams(textProgressParams);
         
-        // Create text container with fixed height to prevent jumping
+        // Create two-line text container (vertical layout)
         LinearLayout textContainer = new LinearLayout(getContext());
-        textContainer.setOrientation(LinearLayout.HORIZONTAL);
+        textContainer.setOrientation(LinearLayout.VERTICAL);
         textContainer.setGravity(Gravity.CENTER_VERTICAL);
-        int fixedTextHeight = (int) (48 * getContext().getResources().getDisplayMetrics().density); // 48dp fixed height
+        int fixedTextHeight = (int) (56 * getContext().getResources().getDisplayMetrics().density); // 56dp for two lines
         textContainer.setLayoutParams(new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.MATCH_PARENT,
             fixedTextHeight
         ));
         
-        // Create main text
-        TextView mainText = new TextView(getContext());
+        // Create main text (top line)
+        mainText = new TextView(getContext());
         mainText.setText("Getting Events for Auto Upload");
-        mainText.setTextColor(Color.WHITE);
-        mainText.setTextSize(18); // Larger text
-        mainText.setTypeface(Typeface.DEFAULT_BOLD); // Bold text
+        mainText.setTextColor(Color.parseColor("#212121")); // Dark gray like modern design
+        mainText.setTextSize(16); // text-base size (1rem = 16sp)
+        mainText.setSingleLine(true);
+        mainText.setEllipsize(android.text.TextUtils.TruncateAt.END);
         
-        // Create dots text for animation
+        // Try to load Outfit font with semibold weight (600)
+        try {
+            // Try Outfit SemiBold first (weight 600)
+            Typeface outfitSemiBold = androidx.core.content.res.ResourcesCompat.getFont(getContext(), R.font.outfit_semibold);
+            if (outfitSemiBold != null) {
+                mainText.setTypeface(outfitSemiBold);
+            } else {
+                // Fallback to Outfit Medium with bold style for semibold effect
+                Typeface outfitMedium = androidx.core.content.res.ResourcesCompat.getFont(getContext(), R.font.outfit_medium);
+                if (outfitMedium != null) {
+                    mainText.setTypeface(outfitMedium, Typeface.BOLD); // Add bold style for weight 600 effect
+                } else {
+                    mainText.setTypeface(Typeface.DEFAULT, Typeface.BOLD); // Fallback with bold
+                }
+            }
+        } catch (Exception e) {
+            mainText.setTypeface(Typeface.DEFAULT, Typeface.BOLD); // Fallback with bold
+        }
+        
+        // Create secondary text (bottom line)
+        secondaryText = new TextView(getContext());
+        secondaryText.setText("Loading event details");
+        secondaryText.setTextColor(Color.parseColor("#64748b")); // text-muted-foreground
+        secondaryText.setTextSize(12); // text-xs size (0.75rem = 12sp)
+        secondaryText.setSingleLine(true);
+        secondaryText.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        
+        // Apply font styling for secondary text (regular weight)
+        try {
+            Typeface outfitRegular = androidx.core.content.res.ResourcesCompat.getFont(getContext(), R.font.outfit_regular);
+            if (outfitRegular != null) {
+                secondaryText.setTypeface(outfitRegular);
+            } else {
+                secondaryText.setTypeface(Typeface.DEFAULT); // Fallback to regular
+            }
+        } catch (Exception e) {
+            secondaryText.setTypeface(Typeface.DEFAULT); // Fallback to regular
+        }
+        LinearLayout.LayoutParams secondaryParams = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        secondaryParams.setMargins(0, dpToPx(2), 0, 0); // 2dp top margin for spacing
+        secondaryText.setLayoutParams(secondaryParams);
+        
+        // Add text elements to container (vertical stack)
+        textContainer.addView(mainText);
+        textContainer.addView(secondaryText);
+        
+        // Create dots text for animation (separate, will be hidden in new design)
         dotsTextView = new TextView(getContext());
         dotsTextView.setText("...");
-        dotsTextView.setTextColor(Color.WHITE);
-        dotsTextView.setTextSize(18); // Larger text
-        dotsTextView.setTypeface(Typeface.DEFAULT_BOLD); // Bold text
-        dotsTextView.setPadding(16, 0, 0, 0);
-        
-        // Add text elements to container
-        textContainer.addView(mainText);
-        textContainer.addView(dotsTextView);
+        dotsTextView.setTextColor(Color.parseColor("#212121"));
+        dotsTextView.setTextSize(14);
+        dotsTextView.setVisibility(View.GONE); // Hide dots in new design
         
         // Create thumbnail view (initially hidden) - goes in thumbnail container
         thumbnailView = new ImageView(getContext());
@@ -1217,7 +1450,7 @@ public class MultiEventAutoUploadPlugin extends Plugin {
         // Create photo name text (goes under thumbnail)
         photoNameText = new TextView(getContext());
         photoNameText.setTextColor(Color.WHITE);
-        photoNameText.setTextSize(10); // Smaller text for under thumbnail
+        photoNameText.setTextSize(8); // Smaller text for under thumbnail
         photoNameText.setGravity(Gravity.CENTER);
         photoNameText.setVisibility(View.GONE); // Initially hidden
         photoNameText.setMaxWidth((int) (80 * getContext().getResources().getDisplayMetrics().density)); // Match thumbnail width
@@ -1240,10 +1473,29 @@ public class MultiEventAutoUploadPlugin extends Plugin {
         
         // Create upload status text (goes in text/progress container)
         uploadStatusText = new TextView(getContext());
-        uploadStatusText.setTextColor(Color.WHITE);
-        uploadStatusText.setTextSize(12);
+        uploadStatusText.setTextColor(Color.parseColor("#212121")); // Same as mainText
+        uploadStatusText.setTextSize(16); // text-base size (1rem = 16sp) - same as mainText
         uploadStatusText.setGravity(Gravity.LEFT); // Left align for better layout
         uploadStatusText.setVisibility(View.GONE); // Initially hidden
+        
+        // Apply same font styling as mainText
+        try {
+            // Try Outfit SemiBold first (weight 600)
+            Typeface outfitSemiBold = androidx.core.content.res.ResourcesCompat.getFont(getContext(), R.font.outfit_semibold);
+            if (outfitSemiBold != null) {
+                uploadStatusText.setTypeface(outfitSemiBold);
+            } else {
+                // Fallback to Outfit Medium with bold style for semibold effect
+                Typeface outfitMedium = androidx.core.content.res.ResourcesCompat.getFont(getContext(), R.font.outfit_medium);
+                if (outfitMedium != null) {
+                    uploadStatusText.setTypeface(outfitMedium, Typeface.BOLD); // Add bold style for weight 600 effect
+                } else {
+                    uploadStatusText.setTypeface(Typeface.DEFAULT, Typeface.BOLD); // Fallback with bold
+                }
+            }
+        } catch (Exception e) {
+            uploadStatusText.setTypeface(Typeface.DEFAULT, Typeface.BOLD); // Fallback with bold
+        }
         LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
@@ -1260,20 +1512,22 @@ public class MultiEventAutoUploadPlugin extends Plugin {
         contentContainer.addView(thumbnailContainer);
         contentContainer.addView(textProgressContainer);
         
-        // Create close button
-        Button closeButton = new Button(getContext());
-        closeButton.setText("✕");
-        closeButton.setTextColor(Color.WHITE);
-        closeButton.setTextSize(20); // Larger close button
-        closeButton.setBackgroundColor(Color.parseColor("#66FFFFFF")); // More visible white background
-        closeButton.setPadding(0, 0, 0, 0);
-        closeButton.setTypeface(Typeface.DEFAULT_BOLD);
+        // Create simple close button as TextView in top right
+        TextView closeButton = new TextView(getContext());
+        closeButton.setText("×");
+        closeButton.setTextColor(Color.parseColor("#212121")); // Same color as overlay text
+        closeButton.setTextSize(TypedValue.COMPLEX_UNIT_PX, dpToPx(16)); // 16px text size
+        closeButton.setBackgroundColor(Color.TRANSPARENT);
+        closeButton.setPadding(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(8)); // Even padding for click area
+        closeButton.setTypeface(Typeface.DEFAULT);
+        closeButton.setGravity(Gravity.CENTER);
         
-        // Set close button layout
-        LinearLayout.LayoutParams closeButtonParams = new LinearLayout.LayoutParams(
-            (int) (50 * getContext().getResources().getDisplayMetrics().density), // 50dp - larger
-            (int) (50 * getContext().getResources().getDisplayMetrics().density)  // 50dp - larger
+        // Position close button in top right corner
+        FrameLayout.LayoutParams closeButtonParams = new FrameLayout.LayoutParams(
+            dpToPx(32), // 32px click area width
+            dpToPx(32)  // 32px click area height
         );
+        closeButtonParams.gravity = Gravity.TOP | Gravity.END;
         closeButton.setLayoutParams(closeButtonParams);
         
         // Close button click handler
@@ -1282,15 +1536,19 @@ public class MultiEventAutoUploadPlugin extends Plugin {
             removeNativeOverlay();
         });
         
-        // Add content container and close button to horizontal container
-        horizontalContainer.addView(contentContainer);
-        horizontalContainer.addView(closeButton);
+        // Add content container to frame container
+        frameContainer.addView(contentContainer);
+        // Add close button on top of content in top right corner
+        frameContainer.addView(closeButton);
         
-        // Add horizontal container to main overlay
-        nativeOverlay.addView(horizontalContainer);
+        // Add frame container to main overlay
+        nativeOverlay.addView(frameContainer);
         
         // Add overlay to activity
         contentView.addView(nativeOverlay);
+        
+        // Set initial state to "getting_events"
+        setOverlayState("getting_events", "Getting Events for Auto Upload", "Loading event details", "");
         
         // Start dots animation
         startDotsAnimation();
@@ -1310,14 +1568,19 @@ public class MultiEventAutoUploadPlugin extends Plugin {
                 }
                 nativeOverlay = null;
                 
+                // CRITICAL: Stop all animations to prevent ANR
+                stopDotsAnimation();
+                stopMainTextAnimation();
+                
                 // Reset UI component references
                 thumbnailView = null;
                 photoNameText = null;
                 progressBar = null;
+                mainText = null;
+                secondaryText = null;
+                iconImage = null;
+                iconContainer = null;
                 uploadStatusText = null;
-                
-                // Stop dots animation
-                stopDotsAnimation();
                 
                 Log.d(TAG, "🎨 Native overlay removed");
             } catch (Exception e) {
@@ -1341,10 +1604,13 @@ public class MultiEventAutoUploadPlugin extends Plugin {
         dotsAnimationRunnable = new Runnable() {
             @Override
             public void run() {
-                if (dotsTextView != null) {
+                if (dotsTextView != null && nativeOverlay != null) {
                     dotsTextView.setText(dotPatterns[currentIndex[0]]);
                     currentIndex[0] = (currentIndex[0] + 1) % dotPatterns.length;
                     dotsAnimationHandler.postDelayed(this, 600);
+                } else {
+                    // Stop animation if overlay is gone
+                    stopDotsAnimation();
                 }
             }
         };
@@ -1386,6 +1652,68 @@ public class MultiEventAutoUploadPlugin extends Plugin {
     }
     
     /**
+     * Set overlay state: Getting Events, Scanning, or Upload
+     */
+    private void setOverlayState(String state, String mainTextContent, String secondaryTextContent, String eventName) {
+        new Handler(Looper.getMainLooper()).post(() -> {
+            if (mainText != null && secondaryText != null && iconImage != null && iconContainer != null) {
+                try {
+                    // Update both text lines
+                    mainText.setText(mainTextContent);
+                    secondaryText.setText(secondaryTextContent);
+                    
+                    // Handle animated dots for Getting Events and Scanning states
+                    if (state.equals("getting_events") || state.equals("scanning")) {
+                        startMainTextAnimation(mainTextContent);
+                    } else {
+                        stopMainTextAnimation();
+                    }
+                    
+                    // Show text container and hide uploadStatusText (we use our own text now)
+                    LinearLayout textContainer = (LinearLayout) mainText.getParent();
+                    if (textContainer != null) {
+                        textContainer.setVisibility(View.VISIBLE);
+                    }
+                    if (uploadStatusText != null) {
+                        uploadStatusText.setVisibility(View.GONE);
+                    }
+                    
+                    // Update icon/thumbnail based on state
+                    switch (state) {
+                        case "getting_events":
+                            iconImage.setImageResource(android.R.drawable.stat_sys_download);
+                            iconContainer.setVisibility(View.VISIBLE);
+                            if (thumbnailView != null) thumbnailView.setVisibility(View.GONE);
+                            if (progressBar != null) progressBar.setVisibility(View.GONE);
+                            break;
+                        case "scanning":
+                            iconImage.setImageResource(android.R.drawable.ic_menu_search);
+                            iconContainer.setVisibility(View.VISIBLE);
+                            if (thumbnailView != null) thumbnailView.setVisibility(View.GONE);
+                            if (progressBar != null) progressBar.setVisibility(View.GONE);
+                            break;
+                        case "upload":
+                            iconContainer.setVisibility(View.GONE);
+                            if (thumbnailView != null) thumbnailView.setVisibility(View.VISIBLE);
+                            if (progressBar != null) progressBar.setVisibility(View.VISIBLE);
+                            break;
+                        case "upload_complete":
+                            iconImage.setImageResource(android.R.drawable.checkbox_on_background); // Green checkmark
+                            iconContainer.setVisibility(View.VISIBLE);
+                            if (thumbnailView != null) thumbnailView.setVisibility(View.GONE);
+                            if (progressBar != null) progressBar.setVisibility(View.GONE);
+                            break;
+                    }
+                    
+                    Log.d(TAG, "🔄 Set overlay state: " + state + " | Main: " + mainTextContent + " | Secondary: " + secondaryTextContent);
+                } catch (Exception e) {
+                    Log.e(TAG, "❌ Error setting overlay state: " + e.getMessage());
+                }
+            }
+        });
+    }
+    
+    /**
      * Stop the dots animation
      */
     private void stopDotsAnimation() {
@@ -1397,10 +1725,92 @@ public class MultiEventAutoUploadPlugin extends Plugin {
     }
     
     /**
+     * Start animated dots on main text for Getting Events and Scanning states
+     */
+    private void startMainTextAnimation(String baseText) {
+        stopMainTextAnimation(); // Stop any existing animation
+        
+        Handler mainTextAnimationHandler = new Handler(Looper.getMainLooper());
+        Runnable mainTextAnimationRunnable = new Runnable() {
+            private int dotCount = 0;
+            
+            @Override
+            public void run() {
+                if (mainText != null && nativeOverlay != null) {
+                    String dots = "";
+                    for (int i = 0; i < dotCount; i++) {
+                        dots += ".";
+                    }
+                    mainText.setText(baseText + dots);
+                    
+                    dotCount = (dotCount + 1) % 4; // Cycle through 0, 1, 2, 3 dots
+                    mainTextAnimationHandler.postDelayed(this, 500); // Update every 500ms
+                } else {
+                    // Stop animation if overlay is gone
+                    stopMainTextAnimation();
+                }
+            }
+        };
+        
+        // Store references for cleanup
+        this.dotsAnimationHandler = mainTextAnimationHandler;
+        this.dotsAnimationRunnable = mainTextAnimationRunnable;
+        
+        mainTextAnimationHandler.post(mainTextAnimationRunnable);
+    }
+    
+    /**
+     * Stop main text animation
+     */
+    private void stopMainTextAnimation() {
+        if (dotsAnimationHandler != null && dotsAnimationRunnable != null) {
+            dotsAnimationHandler.removeCallbacks(dotsAnimationRunnable);
+            dotsAnimationHandler = null;
+            dotsAnimationRunnable = null;
+        }
+    }
+    
+    /**
+     * Show upload complete state with summary
+     */
+    private void showUploadComplete() {
+        // Build summary text
+        StringBuilder summary = new StringBuilder();
+        if (uploadedCount > 0) {
+            summary.append(uploadedCount).append(" Uploaded");
+        }
+        if (duplicatesCount > 0) {
+            if (summary.length() > 0) summary.append(", ");
+            summary.append(duplicatesCount).append(" Duplicates");
+        }
+        if (failedCount > 0) {
+            if (summary.length() > 0) summary.append(", ");
+            summary.append(failedCount).append(" Failed");
+        }
+        
+        // If no summary text, show generic message
+        if (summary.length() == 0) {
+            summary.append("No new photos to upload");
+        }
+        
+        setOverlayState("upload_complete", "Upload Complete", summary.toString(), "");
+        
+        // Auto-close after 3 seconds
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            removeNativeOverlay();
+        }, 3000);
+    }
+    
+    /**
      * Start the auto-upload process
      */
     private void startAutoUploadProcess() {
         Log.d(TAG, "🔄 Starting auto-upload process...");
+        
+        // Reset upload counters for new session
+        uploadedCount = 0;
+        duplicatesCount = 0;
+        failedCount = 0;
         
         // Delay to let overlay show
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
@@ -1426,6 +1836,301 @@ public class MultiEventAutoUploadPlugin extends Plugin {
     }
     
     /**
+     * Get auto-upload enabled setting from web localStorage
+     */
+    private boolean getWebAutoUploadSettings(String userId) {
+        String script = String.format(
+            "const settingsKey = 'auto-upload-settings-%s';" +
+            "const settings = localStorage.getItem(settingsKey);" +
+            "if (settings) {" +
+            "  const parsed = JSON.parse(settings);" +
+            "  console.log('🔍 [ANDROID] Read web auto-upload settings:', parsed);" +
+            "  return parsed.autoUploadEnabled || false;" +
+            "} else {" +
+            "  console.log('🔍 [ANDROID] No auto-upload settings found in localStorage');" +
+            "  return false;" +
+            "}",
+            userId
+        );
+        
+        try {
+            final Object lock = new Object();
+            final boolean[] result = {false};
+            final boolean[] completed = {false};
+            
+            new Handler(Looper.getMainLooper()).post(() -> {
+                getBridge().getWebView().evaluateJavascript(script, value -> {
+                    synchronized (lock) {
+                        String cleanValue = value != null ? value.replace("\"", "") : "false";
+                        result[0] = "true".equals(cleanValue);
+                        completed[0] = true;
+                        lock.notify();
+                    }
+                });
+            });
+            
+            synchronized (lock) {
+                if (!completed[0]) {
+                    lock.wait(5000); // 5 second timeout
+                }
+            }
+            
+            Log.d(TAG, "🔍 Web auto-upload enabled: " + result[0]);
+            return result[0];
+            
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error reading web auto-upload settings: " + e.getMessage());
+            return false; // Default to disabled if can't read
+        }
+    }
+    
+    /**
+     * Get wifi-only setting from web localStorage
+     */
+    private boolean getWebWifiOnlySettings(String userId) {
+        String script = String.format(
+            "const settingsKey = 'auto-upload-settings-%s';" +
+            "const settings = localStorage.getItem(settingsKey);" +
+            "if (settings) {" +
+            "  const parsed = JSON.parse(settings);" +
+            "  return parsed.wifiOnlyUpload || false;" +
+            "} else {" +
+            "  return false;" +
+            "}",
+            userId
+        );
+        
+        try {
+            final Object lock = new Object();
+            final boolean[] result = {false};
+            final boolean[] completed = {false};
+            
+            new Handler(Looper.getMainLooper()).post(() -> {
+                getBridge().getWebView().evaluateJavascript(script, value -> {
+                    synchronized (lock) {
+                        String cleanValue = value != null ? value.replace("\"", "") : "false";
+                        result[0] = "true".equals(cleanValue);
+                        completed[0] = true;
+                        lock.notify();
+                    }
+                });
+            });
+            
+            synchronized (lock) {
+                if (!completed[0]) {
+                    lock.wait(5000); // 5 second timeout
+                }
+            }
+            
+            Log.d(TAG, "🔍 Web wifi-only enabled: " + result[0]);
+            return result[0];
+            
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error reading web wifi-only settings: " + e.getMessage());
+            return false; // Default to allow all networks if can't read
+        }
+    }
+    
+    /**
+     * Check if web app is ready by verifying Capacitor plugins are available
+     */
+    private void checkWebAppReadiness(SettingsCallback callback) {
+        final String readinessScript = 
+            "(() => {" +
+            "  try {" +
+            "    console.log('🔍 [ANDROID] Checking web app readiness...');" +
+            "    " +
+            "    // First check if localStorage has ANY auto-upload related keys" +
+            "    let hasAutoUploadKeys = false;" +
+            "    console.log('🔍 [ANDROID] === CHECKING LOCALSTORAGE ===');" +
+            "    for (let i = 0; i < localStorage.length; i++) {" +
+            "      const key = localStorage.key(i);" +
+            "      if (key && (key.includes('auto_upload') || key.includes('auto-upload') || key.includes('autoUpload'))) {" +
+            "        hasAutoUploadKeys = true;" +
+            "        const value = localStorage.getItem(key);" +
+            "        console.log('🔍 [ANDROID] Found auto-upload key:', key);" +
+            "        console.log('🔍 [ANDROID] Value:', value);" +
+            "      }" +
+            "    }" +
+            "    " +
+            "    // Check if Capacitor is available" +
+            "    if (typeof window.Capacitor === 'undefined') {" +
+            "      console.log('🔍 [ANDROID] Capacitor not available yet');" +
+            "      return false;" +
+            "    }" +
+            "    " +
+            "    // Check if we have plugins" +
+            "    if (!window.Capacitor.Plugins) {" +
+            "      console.log('🔍 [ANDROID] Capacitor.Plugins not available yet');" +
+            "      return false;" +
+            "    }" +
+            "    " +
+            "    const pluginCount = Object.keys(window.Capacitor.Plugins).length;" +
+            "    console.log('🔍 [ANDROID] Found ' + pluginCount + ' Capacitor plugins');" +
+            "    " +
+            "    // Consider ready if we have auto-upload keys OR enough plugins" +
+            "    // The web app might store settings before all plugins load" +
+            "    if (hasAutoUploadKeys) {" +
+            "      console.log('🔍 [ANDROID] ✅ Web app ready - auto-upload settings found in localStorage');" +
+            "      return true;" +
+            "    }" +
+            "    " +
+            "    // If we have any plugins at all, we're probably ready" +
+            "    // The original check for 10 plugins was too strict" +
+            "    if (pluginCount > 0) {" +
+            "      console.log('🔍 [ANDROID] ✅ Web app ready - ' + pluginCount + ' plugins loaded');" +
+            "      return true;" +
+            "    }" +
+            "    " +
+            "    console.log('🔍 [ANDROID] ❌ Web app not ready - no plugins and no auto-upload settings');" +
+            "    return false;" +
+            "  } catch (e) {" +
+            "    console.error('🔍 [ANDROID] Error checking readiness:', e.message);" +
+            "    return false;" +
+            "  }" +
+            "})()";
+        
+        new Handler(Looper.getMainLooper()).post(() -> {
+            getBridge().getWebView().evaluateJavascript(readinessScript, value -> {
+                String cleanValue = value != null ? value.replace("\"", "") : "false";
+                boolean isReady = "true".equals(cleanValue);
+                Log.d(TAG, "🔍 Web app readiness check: " + isReady);
+                callback.onResult(isReady);
+            });
+        });
+    }
+
+    /**
+     * Interface for async settings callback
+     */
+    private interface SettingsCallback {
+        void onResult(boolean enabled);
+    }
+    
+    /**
+     * Get auto-upload enabled setting from web localStorage (asynchronous)
+     */
+    private void getWebAutoUploadSettingsAsync(String userId, SettingsCallback callback) {
+        // Run comprehensive debug tests to identify the issue
+        Log.d(TAG, "🔬 Starting comprehensive debug tests for localStorage access");
+        
+        // Test 1: Can we return a simple string?
+        final String test1 = "'test-string'";
+        
+        // Test 2: Can we access localStorage at all?
+        final String test2 = "typeof localStorage";
+        
+        // Test 3: Can we get localStorage.length?
+        final String test3 = "localStorage.length";
+        
+        // Test 4: Can we get all localStorage keys?
+        final String test4 = 
+            "(() => {" +
+            "  const keys = [];" +
+            "  for (let i = 0; i < localStorage.length; i++) {" +
+            "    keys.push(localStorage.key(i));" +
+            "  }" +
+            "  return JSON.stringify(keys);" +
+            "})()";
+        
+        // Test 5: Can we get a specific key directly?
+        final String test5 = "localStorage.getItem('auto_upload_settings_5ba31dfa-92d2-4bed-88b4-3cc81911a690')";
+        
+        // Test 6: Check window.location to verify we're on the right page
+        final String test6 = "window.location.href";
+        
+        // Run all tests sequentially
+        new Handler(Looper.getMainLooper()).post(() -> {
+            // Test 1: Simple string
+            getBridge().getWebView().evaluateJavascript(test1, value -> {
+                Log.d(TAG, "🧪 Test 1 (simple string): " + value);
+                
+                // Test 2: typeof localStorage
+                getBridge().getWebView().evaluateJavascript(test2, value2 -> {
+                    Log.d(TAG, "🧪 Test 2 (typeof localStorage): " + value2);
+                    
+                    // Test 3: localStorage.length
+                    getBridge().getWebView().evaluateJavascript(test3, value3 -> {
+                        Log.d(TAG, "🧪 Test 3 (localStorage.length): " + value3);
+                        
+                        // Test 4: All keys
+                        getBridge().getWebView().evaluateJavascript(test4, value4 -> {
+                            Log.d(TAG, "🧪 Test 4 (all localStorage keys): " + value4);
+                            
+                            // Test 5: Direct key access
+                            getBridge().getWebView().evaluateJavascript(test5, value5 -> {
+                                Log.d(TAG, "🧪 Test 5 (direct key access): " + value5);
+                                
+                                // Test 6: Current URL
+                                getBridge().getWebView().evaluateJavascript(test6, value6 -> {
+                                    Log.d(TAG, "🧪 Test 6 (current URL): " + value6);
+                                    
+                                    // Now run the actual script
+                                    final String actualScript = 
+                                        "(() => {" +
+                                        "  try {" +
+                                        "    const key = 'auto_upload_settings_5ba31dfa-92d2-4bed-88b4-3cc81911a690';" +
+                                        "    console.log('[ANDROID] Looking for key:', key);" +
+                                        "    const value = localStorage.getItem(key);" +
+                                        "    console.log('[ANDROID] Raw value from localStorage:', value);" +
+                                        "    if (value) {" +
+                                        "      const settings = JSON.parse(value);" +
+                                        "      console.log('[ANDROID] Parsed settings:', settings);" +
+                                        "      const result = settings.autoUploadEnabled === true;" +
+                                        "      console.log('[ANDROID] Returning:', result);" +
+                                        "      return result;" +
+                                        "    }" +
+                                        "    console.log('[ANDROID] No value found, returning false');" +
+                                        "    return false;" +
+                                        "  } catch (e) {" +
+                                        "    console.error('[ANDROID] Error in script:', e);" +
+                                        "    return 'ERROR: ' + e.message;" +
+                                        "  }" +
+                                        "})()";
+                                    
+                                    Log.d(TAG, "🔍 Now executing actual localStorage check");
+                                    getBridge().getWebView().evaluateJavascript(actualScript, finalValue -> {
+                                        Log.d(TAG, "🎯 Final result: " + finalValue);
+                                        
+                                        if (finalValue == null || "null".equals(finalValue)) {
+                                            Log.d(TAG, "❌ Result is null - defaulting to false");
+                                            callback.onResult(false);
+                                            return;
+                                        }
+                                        
+                                        // Remove quotes and clean up
+                                        String cleanValue = finalValue.trim().replace("\"", "");
+                                        Log.d(TAG, "🔍 Cleaned value: '" + cleanValue + "'");
+                                        
+                                        // Check what we got
+                                        boolean enabled = false;
+                                        if ("true".equals(cleanValue)) {
+                                            enabled = true;
+                                            Log.d(TAG, "🔍 Parsed as true");
+                                        } else if ("false".equals(cleanValue)) {
+                                            enabled = false;
+                                            Log.d(TAG, "🔍 Parsed as false");
+                                        } else if (cleanValue.startsWith("ERROR:")) {
+                                            Log.d(TAG, "❌ Script error: " + cleanValue);
+                                            enabled = false;
+                                        } else {
+                                            Log.d(TAG, "🔍 Unexpected value: '" + cleanValue + "', defaulting to false");
+                                            enabled = false;
+                                        }
+                                        
+                                        Log.d(TAG, "🔍 Web auto-upload enabled: " + enabled);
+                                        callback.onResult(enabled);
+                                    });
+                                });
+                            });
+                        });
+                    });
+                });
+            });
+        });
+    }
+
+    /**
      * Start auto-upload process with pre-extracted user ID and access token
      */
     private void startAutoUploadProcessWithTokens(String userId, String accessToken) {
@@ -1437,8 +2142,13 @@ public class MultiEventAutoUploadPlugin extends Plugin {
                 Log.d(TAG, "📤 Triggering auto-upload for user: " + userId);
                 Log.d(TAG, "📋 Using pre-extracted access token: " + accessToken.length() + " characters");
                 
-                // Call checkAllEvents with pre-extracted token (bypass token retrieval)
-                checkAllEventsInternalWithToken(userId, true, false, false, accessToken);
+                // Auto-upload is already confirmed enabled, just get wifi-only setting
+                boolean webWifiOnlyUpload = getWebWifiOnlySettings(userId);
+                
+                Log.d(TAG, "📋 Auto-upload ENABLED, wifi-only: " + webWifiOnlyUpload);
+                
+                // Call checkAllEvents with confirmed enabled setting
+                checkAllEventsInternalWithToken(userId, true, webWifiOnlyUpload, false, accessToken);
                 
             } catch (Exception e) {
                 Log.e(TAG, "❌ Error in auto-upload process: " + e.getMessage(), e);
@@ -1453,21 +2163,22 @@ public class MultiEventAutoUploadPlugin extends Plugin {
     private void checkAllEventsInternal(String userId, boolean autoEnabled, boolean wifiOnly, boolean backgroundEnabled) {
         Log.d(TAG, "🔄 Running internal checkAllEvents...");
         
-        // CRITICAL: Check Permission Gate before proceeding
-        if (!checkPermissionGateWithRetry()) {
-            Log.d(TAG, "⛔ Internal auto-upload blocked by Permission Gate - user needs to complete onboarding");
-            removeNativeOverlayWithDelay(1000);
-            return;
-        }
-        
-        // CRITICAL: Check actual photo permission before proceeding
-        if (!hasActualPhotoPermission()) {
-            Log.d(TAG, "⛔ Internal auto-upload blocked - user has not granted photo/gallery permission");
-            removeNativeOverlayWithDelay(1000);
-            return;
-        }
-        
-        try {
+        // CRITICAL: Move ALL heavy operations including Permission Gate to background thread
+        java.util.concurrent.CompletableFuture.runAsync(() -> {
+            try {
+                // CRITICAL: Check Permission Gate in background thread
+                if (!checkPermissionGateWithRetry()) {
+                    Log.d(TAG, "⛔ Internal auto-upload blocked by Permission Gate - user needs to complete onboarding");
+                    new Handler(Looper.getMainLooper()).post(() -> removeNativeOverlayWithDelay(1000));
+                    return;
+                }
+                
+                // CRITICAL: Check actual photo permission in background thread
+                if (!hasActualPhotoPermission()) {
+                    Log.d(TAG, "⛔ Internal auto-upload blocked - user has not granted photo/gallery permission");
+                    new Handler(Looper.getMainLooper()).post(() -> removeNativeOverlayWithDelay(1000));
+                    return;
+                }
             // Step 1: Check global auto-upload setting
             if (!autoEnabled) {
                 Log.d(TAG, "⏸️ Global auto-upload is DISABLED - skipping all events");
@@ -1513,26 +2224,20 @@ public class MultiEventAutoUploadPlugin extends Plugin {
             
             Log.d(TAG, "📅 Found " + events.length() + " events for user");
             
-            // Process events - count those with auto-upload enabled
-            int eventsWithAutoUpload = 0;
-            for (int i = 0; i < events.length(); i++) {
-                JSONObject event = events.getJSONObject(i);
-                boolean eventAutoUpload = event.optBoolean("auto_upload_enabled", true);
-                if (eventAutoUpload) {
-                    eventsWithAutoUpload++;
-                }
-            }
+            // Process all events (global auto-upload enabled)
+            int eventsWithAutoUpload = events.length();
             
-            Log.d(TAG, "📊 Events with auto-upload enabled: " + eventsWithAutoUpload + "/" + events.length());
+            Log.d(TAG, "📊 Processing all events (global auto-upload enabled): " + eventsWithAutoUpload);
             Log.d(TAG, "✅ Auto-upload check completed successfully");
             
             // Remove overlay after success
-            removeNativeOverlayWithDelay(1000);
+            new Handler(Looper.getMainLooper()).post(() -> removeNativeOverlayWithDelay(1000));
             
-        } catch (Exception e) {
-            Log.e(TAG, "❌ Internal auto-upload check failed: " + e.getMessage(), e);
-            removeNativeOverlayWithDelay(2000);
-        }
+            } catch (Exception e) {
+                Log.e(TAG, "❌ Internal auto-upload check failed: " + e.getMessage(), e);
+                new Handler(Looper.getMainLooper()).post(() -> removeNativeOverlayWithDelay(2000));
+            }
+        }); // End background thread
     }
     
     /**
@@ -1541,12 +2246,31 @@ public class MultiEventAutoUploadPlugin extends Plugin {
     private void checkAllEventsInternalWithToken(String userId, boolean autoEnabled, boolean wifiOnly, boolean backgroundEnabled, String accessToken) {
         Log.d(TAG, "🔄 Running internal checkAllEvents with pre-extracted token...");
         
-        // CRITICAL: Check Permission Gate before proceeding
-        if (!checkPermissionGateWithRetry()) {
-            Log.d(TAG, "⛔ Internal auto-upload (with token) blocked by Permission Gate - user needs to complete onboarding");
-            removeNativeOverlayWithDelay(1000);
-            return;
-        }
+        // CRITICAL: Move Permission Gate check to background thread to prevent ANR
+        java.util.concurrent.CompletableFuture.runAsync(() -> {
+            try {
+                // CRITICAL: Check Permission Gate in background thread
+                if (!checkPermissionGateWithRetry()) {
+                    Log.d(TAG, "⛔ Internal auto-upload (with token) blocked by Permission Gate - user needs to complete onboarding");
+                    new Handler(Looper.getMainLooper()).post(() -> removeNativeOverlayWithDelay(1000));
+                    return;
+                }
+                
+                // Continue with internal check on main thread
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    continueInternalCheckWithToken(userId, autoEnabled, wifiOnly, backgroundEnabled, accessToken);
+                });
+            } catch (Exception e) {
+                Log.e(TAG, "❌ Error checking Permission Gate in internal flow: " + e.getMessage(), e);
+                new Handler(Looper.getMainLooper()).post(() -> removeNativeOverlayWithDelay(1000));
+            }
+        });
+    }
+    
+    /**
+     * Continue internal check after Permission Gate validation
+     */
+    private void continueInternalCheckWithToken(String userId, boolean autoEnabled, boolean wifiOnly, boolean backgroundEnabled, String accessToken) {
         
         // CRITICAL: Check actual photo permission before proceeding
         if (!hasActualPhotoPermission()) {
@@ -1594,17 +2318,10 @@ public class MultiEventAutoUploadPlugin extends Plugin {
                     
                     Log.d(TAG, "📅 Found " + events.length() + " events for user");
                     
-                    // Process events - count those with auto-upload enabled
-                    int eventsWithAutoUpload = 0;
-                    for (int i = 0; i < events.length(); i++) {
-                        JSONObject event = events.getJSONObject(i);
-                        boolean eventAutoUpload = event.optBoolean("auto_upload_enabled", true);
-                        if (eventAutoUpload) {
-                            eventsWithAutoUpload++;
-                        }
-                    }
+                    // Process all events (global auto-upload enabled)
+                    int eventsWithAutoUpload = events.length();
                     
-                    Log.d(TAG, "📊 Events with auto-upload enabled: " + eventsWithAutoUpload + "/" + events.length());
+                    Log.d(TAG, "📊 Processing all events (global auto-upload enabled): " + eventsWithAutoUpload);
                     
                     if (eventsWithAutoUpload > 0) {
                         Log.d(TAG, "🔍 Starting sequential event scanning for photo detection...");
@@ -1613,7 +2330,7 @@ public class MultiEventAutoUploadPlugin extends Plugin {
                         scanEventsSequentially(events, accessToken);
                         
                     } else {
-                        Log.d(TAG, "✅ No events with auto-upload enabled - completing");
+                        Log.d(TAG, "✅ No events found - completing");
                         
                         // Remove overlay after success (on main thread)
                         new Handler(Looper.getMainLooper()).post(() -> {
@@ -1656,16 +2373,9 @@ public class MultiEventAutoUploadPlugin extends Plugin {
             int totalEvents = events.length();
             Log.d(TAG, "📋 Starting sequential scan of " + totalEvents + " events");
             
-            // Process each event one by one
+            // Process each event one by one (global auto-upload enabled)
             for (int i = 0; i < totalEvents; i++) {
                 JSONObject event = events.getJSONObject(i);
-                
-                // Check if this event has auto-upload enabled
-                boolean eventAutoUpload = event.optBoolean("auto_upload_enabled", true);
-                if (!eventAutoUpload) {
-                    Log.d(TAG, "⏸️ Skipping event " + (i+1) + "/" + totalEvents + " (auto-upload disabled)");
-                    continue;
-                }
                 
                 String eventId = event.getString("event_id");
                 String eventName = event.getString("name");
@@ -1673,7 +2383,7 @@ public class MultiEventAutoUploadPlugin extends Plugin {
                 Log.d(TAG, "🔍 Processing event " + (i+1) + "/" + totalEvents + ": " + eventName);
                 
                 // Update overlay to show current scanning progress
-                updateOverlayText("Scanning " + eventName);
+                setOverlayState("scanning", "Scanning " + eventName, "Looking for photos to auto-upload", eventName);
                 
                 // Hide upload components during scanning
                 new Handler(Looper.getMainLooper()).post(() -> {
@@ -2041,7 +2751,7 @@ public class MultiEventAutoUploadPlugin extends Plugin {
             
             // Update overlay with upload progress
             new Handler(Looper.getMainLooper()).post(() -> {
-                updateOverlayText("Uploading " + eventName + " Photos " + currentIndex + "/" + total + "...");
+                setOverlayState("upload", "Uploading " + currentIndex + "/" + total, photo.fileName, eventName);
                 
                 // Show photo thumbnail
                 showPhotoThumbnail(photo.filePath, photo.fileName);
@@ -2208,6 +2918,14 @@ public class MultiEventAutoUploadPlugin extends Plugin {
         } catch (Exception e) {
             Log.w(TAG, "⚠️ Could not hide upload components: " + e.getMessage());
         }
+    }
+    
+    /**
+     * Convert dp to pixels
+     */
+    private int dpToPx(int dp) {
+        float density = getContext().getResources().getDisplayMetrics().density;
+        return Math.round(dp * density);
     }
     
     /**

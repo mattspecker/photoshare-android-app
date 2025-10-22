@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    
+    <!-- Background color with 10% alpha -->
+    <solid android:color="@color/photoshare_success_10_alpha" />
+    
+    <!-- Rounded corners (12dp) -->
+    <corners android:radius="12dp" />
+    
+</shape>

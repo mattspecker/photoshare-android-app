@@ -16,6 +16,13 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.*;
+import android.animation.AnimatorSet;
+import android.animation.ObjectAnimator;
+import android.animation.ValueAnimator;
+import android.graphics.Typeface;
+import android.graphics.PorterDuff;
+import androidx.core.content.ContextCompat;
+import androidx.core.content.res.ResourcesCompat;
 import java.io.InputStream;
 import java.util.HashMap;
 import java.util.Map;
@@ -47,6 +54,11 @@ public class UploadProgressOverlay {
     private android.os.Handler animationHandler;
     private Runnable animationRunnable;
     private String baseMessage;
+    private AnimatorSet pulseAnimation;
+    private ImageView iconImage;
+    private FrameLayout iconContainer;
+    private LinearLayout mainContentLayout;
+    private View topDivider;
     
     private UploadProgressOverlay() {
         photoViews = new HashMap<>();
@@ -86,58 +98,106 @@ public class UploadProgressOverlay {
         
         currentActivity = activity;
         
-        // Create main overlay container with PhotoShare dark theme
-        LinearLayout overlayContainer = new LinearLayout(activity);
-        overlayContainer.setOrientation(LinearLayout.VERTICAL);
-        overlayContainer.setBackgroundColor(Color.parseColor("#1a1d29")); // Dark theme like upload overlay
-        overlayContainer.setPadding(20, 15, 20, 15);
-        overlayContainer.setElevation(8f);
-        overlayContainer.setMinimumHeight(150); // Set consistent minimum height
+        // Create main overlay container with PhotoShare new design (bottom position)
+        FrameLayout overlayContainer = new FrameLayout(activity);
+        overlayContainer.setBackgroundResource(R.drawable.overlay_background);
+        overlayContainer.setElevation(4f);
         
-        // Header with title and close button
-        LinearLayout headerLayout = new LinearLayout(activity);
-        headerLayout.setOrientation(LinearLayout.HORIZONTAL);
-        headerLayout.setLayoutParams(new LinearLayout.LayoutParams(
+        // Add top divider
+        topDivider = new View(activity);
+        topDivider.setBackgroundColor(Color.parseColor("#1F000000")); // 12% alpha black
+        FrameLayout.LayoutParams dividerParams = new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, 1);
+        topDivider.setLayoutParams(dividerParams);
+        overlayContainer.addView(topDivider);
+        
+        // Create main content layout
+        mainContentLayout = new LinearLayout(activity);
+        mainContentLayout.setOrientation(LinearLayout.HORIZONTAL);
+        mainContentLayout.setPadding(dpToPx(20, activity), dpToPx(20, activity), dpToPx(20, activity), dpToPx(20, activity));
+        mainContentLayout.setMinimumHeight(dpToPx(100, activity)); // Taller for better visibility
+        mainContentLayout.setGravity(Gravity.CENTER_VERTICAL);
+        FrameLayout.LayoutParams contentParams = new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        ));
+            ViewGroup.LayoutParams.WRAP_CONTENT);
+        mainContentLayout.setLayoutParams(contentParams);
         
-        TextView title = new TextView(activity);
-        title.setText("🔍 PhotoShare Auto-Upload");
-        title.setTextColor(Color.WHITE);
-        title.setTextSize(16);
-        title.setTypeface(null, android.graphics.Typeface.BOLD);
-        title.setGravity(android.view.Gravity.CENTER);
-        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
+        // Create icon container (64dp x 64dp)
+        iconContainer = new FrameLayout(activity);
+        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(
+            dpToPx(64, activity), dpToPx(64, activity));
+        iconParams.setMargins(0, 0, dpToPx(16, activity), 0);
+        iconContainer.setLayoutParams(iconParams);
+        iconContainer.setBackgroundResource(R.drawable.icon_background_blue);
+        
+        // Add search icon for scanning
+        iconImage = new ImageView(activity);
+        iconImage.setImageResource(R.drawable.ic_search);
+        iconImage.setColorFilter(Color.parseColor("#2B8FFF"), PorterDuff.Mode.SRC_IN);
+        FrameLayout.LayoutParams iconImageParams = new FrameLayout.LayoutParams(
+            dpToPx(32, activity), dpToPx(32, activity));
+        iconImageParams.gravity = Gravity.CENTER;
+        iconImage.setLayoutParams(iconImageParams);
+        iconContainer.addView(iconImage);
+        
+        mainContentLayout.addView(iconContainer);
+        
+        // Start pulse animation
+        startPulseAnimation(iconImage);
+        
+        // Create text container
+        LinearLayout textContainer = new LinearLayout(activity);
+        textContainer.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(
             0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
-        title.setLayoutParams(titleParams);
-        headerLayout.addView(title);
+        textContainer.setLayoutParams(textParams);
+        textContainer.setGravity(Gravity.CENTER_VERTICAL);
+        
+        // Header row with title and close button
+        LinearLayout headerRow = new LinearLayout(activity);
+        headerRow.setOrientation(LinearLayout.HORIZONTAL);
+        headerRow.setLayoutParams(new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT));
+        
+        // Scanning message with animated dots
+        TextView scanningText = new TextView(activity);
+        baseMessage = message; // Store base message for animation
+        scanningText.setText(message); // Will be animated with dots
+        scanningText.setTextColor(Color.parseColor("#212121")); // Dark gray for better readability
+        scanningText.setTextSize(18); // Larger for visibility
+        scanningText.setSingleLine(false);
+        scanningText.setMaxLines(2); // Allow wrapping
+        
+        // Load Outfit font
+        Typeface outfitMedium = ResourcesCompat.getFont(activity, R.font.outfit_medium);
+        if (outfitMedium != null) {
+            scanningText.setTypeface(outfitMedium);
+        }
+        
+        LinearLayout.LayoutParams scanningTextParams = new LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
+        scanningText.setLayoutParams(scanningTextParams);
+        headerRow.addView(scanningText);
         
         // Close button
-        TextView closeButton = new TextView(activity);
-        closeButton.setText("✕");
-        closeButton.setTextColor(Color.parseColor("#ff6b35"));
-        closeButton.setTextSize(18);
-        closeButton.setTypeface(null, android.graphics.Typeface.BOLD);
-        closeButton.setPadding(15, 5, 15, 5);
-        closeButton.setGravity(android.view.Gravity.CENTER);
+        ImageButton closeButton = new ImageButton(activity);
+        closeButton.setImageResource(R.drawable.ic_close);
+        closeButton.setColorFilter(Color.parseColor("#666666"), PorterDuff.Mode.SRC_IN);
+        closeButton.setBackgroundResource(android.R.drawable.btn_default);
+        closeButton.setBackground(null);
+        LinearLayout.LayoutParams closeParams = new LinearLayout.LayoutParams(
+            dpToPx(32, activity), dpToPx(32, activity));
+        closeButton.setLayoutParams(closeParams);
+        closeButton.setMinimumWidth(dpToPx(48, activity));
+        closeButton.setMinimumHeight(dpToPx(48, activity));
         closeButton.setOnClickListener(v -> {
             Log.d(TAG, "🚫 User closed scanning overlay");
             hideOverlay();
         });
-        headerLayout.addView(closeButton);
+        headerRow.addView(closeButton);
         
-        overlayContainer.addView(headerLayout);
-        
-        // Scanning message with animated dots
-        TextView scanningText = new TextView(activity);
-        baseMessage = message; // Store base message for animation (without dots)
-        scanningText.setText(message + "..."); // Start with 3 dots
-        scanningText.setTextColor(Color.parseColor("#ff6b35")); // Orange accent color
-        scanningText.setTextSize(14);
-        scanningText.setTypeface(null, android.graphics.Typeface.BOLD);
-        scanningText.setPadding(0, 10, 0, 5);  // Add vertical spacing
-        overlayContainer.addView(scanningText);
+        textContainer.addView(headerRow);
         
         // Start dot animation (cycling through 1, 2, 3 dots)
         if (animationHandler != null && animationRunnable != null) {
@@ -168,8 +228,10 @@ public class UploadProgressOverlay {
         if (subMessage != null && !subMessage.isEmpty()) {
             TextView subText = new TextView(activity);
             subText.setText(subMessage);
-            subText.setTextColor(Color.parseColor("#CCCCCC")); // Light gray for dark theme
-            subText.setTextSize(11);
+            subText.setTextColor(Color.parseColor("#757575")); // Medium gray
+            subText.setTextSize(14); // Proper size for readability
+            subText.setSingleLine(false);
+            subText.setMaxLines(2);
             LinearLayout.LayoutParams subParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
@@ -186,8 +248,8 @@ public class UploadProgressOverlay {
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT
         );
-        overlayParams.gravity = android.view.Gravity.TOP | android.view.Gravity.CENTER_HORIZONTAL;
-        overlayParams.topMargin = 130; // Match upload overlay position
+        overlayParams.gravity = android.view.Gravity.BOTTOM | android.view.Gravity.CENTER_HORIZONTAL;
+        overlayParams.bottomMargin = 0; // Position at bottom of screen
         overlayContainer.setLayoutParams(overlayParams);
         
         // Add to activity's content view
@@ -243,8 +305,8 @@ public class UploadProgressOverlay {
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.WRAP_CONTENT
                         );
-                        layoutParams.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-                        layoutParams.topMargin = 130;
+                        layoutParams.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+                        layoutParams.bottomMargin = 0;
                         
                         overlayView.setLayoutParams(layoutParams);
                         overlayView.setElevation(1000f); // High elevation to appear above WebView
@@ -271,8 +333,19 @@ public class UploadProgressOverlay {
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT
                     );
-                    layoutParams.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-                    layoutParams.topMargin = 130;
+                    
+                    // CRITICAL: Use bottom positioning for EventPhotoPicker, top for MainActivity
+                    boolean isEventPhotoPicker = activity.getClass().getSimpleName().equals("EventPhotoPickerActivity");
+                    if (isEventPhotoPicker) {
+                        layoutParams.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+                        // Add bottom margin to account for button bar with extra clearance (48dp button + 16dp padding * 2 + 20dp clearance = 100dp)
+                        layoutParams.bottomMargin = (int) (100 * activity.getResources().getDisplayMetrics().density);
+                        Log.d(TAG, "🔧 Using BOTTOM positioning for EventPhotoPicker with button bar margin: " + layoutParams.bottomMargin + "px");
+                    } else {
+                        layoutParams.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+                        layoutParams.topMargin = 130;
+                        Log.d(TAG, "🔧 Using TOP positioning for MainActivity");
+                    }
                     
                     overlayView.setLayoutParams(layoutParams);
                     overlayView.setElevation(1000f); // Very high elevation for DecorView
@@ -291,8 +364,19 @@ public class UploadProgressOverlay {
                                 ViewGroup.LayoutParams.MATCH_PARENT,
                                 ViewGroup.LayoutParams.WRAP_CONTENT
                             );
-                            layoutParams.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-                            layoutParams.topMargin = 130;
+                            
+                            // CRITICAL: Use bottom positioning for EventPhotoPicker, top for MainActivity
+                            boolean isEventPhotoPicker = activity.getClass().getSimpleName().equals("EventPhotoPickerActivity");
+                            if (isEventPhotoPicker) {
+                                layoutParams.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+                                // Add bottom margin to account for button bar with extra clearance (48dp button + 16dp padding * 2 + 20dp clearance = 100dp)
+                                layoutParams.bottomMargin = (int) (100 * activity.getResources().getDisplayMetrics().density);
+                                Log.d(TAG, "🔧 Using BOTTOM positioning for EventPhotoPicker with button bar margin: " + layoutParams.bottomMargin + "px (content view fallback)");
+                            } else {
+                                layoutParams.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+                                layoutParams.topMargin = 130;
+                                Log.d(TAG, "🔧 Using TOP positioning for MainActivity (content view fallback)");
+                            }
                             
                             overlayView.setLayoutParams(layoutParams);
                             overlayView.setElevation(500f);
@@ -734,6 +818,9 @@ public class UploadProgressOverlay {
             animationRunnable = null;
         }
         
+        // Stop pulse animation
+        stopPulseAnimation();
+        
         if (uploadProgressReceiver != null && currentActivity != null) {
             try {
                 // Use application context to match registration context
@@ -776,6 +863,10 @@ public class UploadProgressOverlay {
         overallProgressBar = null;
         currentPhotoThumbnail = null;
         currentPhotoName = null;
+        iconImage = null;
+        iconContainer = null;
+        mainContentLayout = null;
+        topDivider = null;
         photoViews.clear();
         photoUris.clear();
         currentQueueId = null;
@@ -787,6 +878,124 @@ public class UploadProgressOverlay {
      */
     public boolean isShowingForQueue(String queueId) {
         return currentPopup != null && queueId.equals(currentQueueId);
+    }
+    
+    /**
+     * Convert dp to pixels
+     */
+    private int dpToPx(int dp, Context context) {
+        float density = context.getResources().getDisplayMetrics().density;
+        return Math.round(dp * density);
+    }
+    
+    /**
+     * Start pulse animation on a view
+     */
+    private void startPulseAnimation(View view) {
+        if (pulseAnimation != null) {
+            pulseAnimation.cancel();
+        }
+        
+        ObjectAnimator scaleX = ObjectAnimator.ofFloat(view, "scaleX", 1.0f, 1.1f);
+        ObjectAnimator scaleY = ObjectAnimator.ofFloat(view, "scaleY", 1.0f, 1.1f);
+        ObjectAnimator alpha = ObjectAnimator.ofFloat(view, "alpha", 0.6f, 1.0f);
+        
+        scaleX.setRepeatCount(ObjectAnimator.INFINITE);
+        scaleY.setRepeatCount(ObjectAnimator.INFINITE);
+        alpha.setRepeatCount(ObjectAnimator.INFINITE);
+        
+        scaleX.setRepeatMode(ObjectAnimator.REVERSE);
+        scaleY.setRepeatMode(ObjectAnimator.REVERSE);
+        alpha.setRepeatMode(ObjectAnimator.REVERSE);
+        
+        scaleX.setDuration(1500);
+        scaleY.setDuration(1500);
+        alpha.setDuration(1500);
+        
+        pulseAnimation = new AnimatorSet();
+        pulseAnimation.playTogether(scaleX, scaleY, alpha);
+        pulseAnimation.start();
+    }
+    
+    /**
+     * Stop pulse animation
+     */
+    private void stopPulseAnimation() {
+        if (pulseAnimation != null) {
+            pulseAnimation.cancel();
+            pulseAnimation = null;
+        }
+        if (iconImage != null) {
+            iconImage.setScaleX(1.0f);
+            iconImage.setScaleY(1.0f);
+            iconImage.setAlpha(1.0f);
+        }
+    }
+    
+    /**
+     * Show "Getting Event for Auto Upload" state
+     */
+    public void showGettingEventOverlay(Activity activity) {
+        Log.d(TAG, "🔽 Showing 'Getting Event for Auto Upload' overlay");
+        
+        // Reuse scanning overlay with different icon and text
+        showScanningOverlay(activity, "Getting Event for Auto Upload", "Loading event details");
+        
+        // Change icon to download
+        if (iconImage != null) {
+            iconImage.setImageResource(R.drawable.ic_download);
+            iconImage.setColorFilter(Color.parseColor("#2B8FFF"), PorterDuff.Mode.SRC_IN);
+        }
+        
+        // Auto-transition after 3 seconds
+        new android.os.Handler().postDelayed(() -> {
+            Log.d(TAG, "🎯 Transitioning from Getting Event to upload state");
+            // Transition to upload state would happen here
+        }, 3000);
+    }
+    
+    /**
+     * Show upload complete state
+     */
+    public void showCompleteOverlay(Activity activity, int uploaded, int duplicates) {
+        Log.d(TAG, "✅ Showing upload complete overlay");
+        
+        if (overlayView != null && overlayView.getParent() != null) {
+            // Update existing overlay
+            if (iconContainer != null) {
+                iconContainer.setBackgroundResource(R.drawable.icon_background_green);
+            }
+            if (iconImage != null) {
+                stopPulseAnimation();
+                iconImage.setImageResource(R.drawable.ic_check_circle);
+                iconImage.setColorFilter(Color.parseColor("#22C55E"), PorterDuff.Mode.SRC_IN);
+            }
+            if (overallProgressText != null) {
+                overallProgressText.setText("Upload Complete");
+            }
+            if (currentPhotoName != null) {
+                String summary = buildSummaryText(uploaded, duplicates, 0);
+                currentPhotoName.setText(summary);
+            }
+            
+            // Auto-hide after 3 seconds
+            new android.os.Handler().postDelayed(() -> hideOverlay(), 3000);
+        }
+    }
+    
+    /**
+     * Build summary text for complete state
+     */
+    private String buildSummaryText(int uploaded, int duplicates, int outsideDates) {
+        java.util.List<String> parts = new java.util.ArrayList<>();
+        if (uploaded > 0) parts.add(uploaded + " Uploaded");
+        if (duplicates > 0) parts.add(duplicates + " Duplicates");
+        if (outsideDates > 0) parts.add(outsideDates + " Outside event dates");
+        
+        if (parts.isEmpty()) {
+            return "No photos uploaded";
+        }
+        return android.text.TextUtils.join(", ", parts);
     }
     
     /**

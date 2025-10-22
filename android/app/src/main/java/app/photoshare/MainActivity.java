@@ -1,9 +1,11 @@
 package app.photoshare;
 
 import android.os.Bundle;
+import android.os.Build;
 import android.os.Handler;
 import android.util.Log;
 import android.content.SharedPreferences;
+import android.view.View;
 import android.webkit.WebView;
 import android.webkit.ValueCallback;
 import android.widget.Button;
@@ -14,6 +16,8 @@ import android.app.AlertDialog;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import android.content.Context;
+import android.content.Intent;
+import android.net.Uri;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.Plugin;
 import app.photoshare.EventPhotoPickerPlugin;
@@ -28,8 +32,10 @@ public class MainActivity extends BridgeActivity {
     private static final String TAG = "MainActivity";
     private static MainActivity instance;
     
+    
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        
         // Set static instance for WebView access from other activities
         instance = this;
         
@@ -80,6 +86,11 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(BulkDownloadPlugin.class);
         Log.d("MainActivity", "✅ BulkDownloadPlugin registered successfully");
         
+        // Register DeepLinkRouter plugin for push notification deep linking
+        registerPlugin(DeepLinkRouter.class);
+        Log.d("MainActivity", "✅ DeepLinkRouter registered successfully");
+        
+        
         // Register ImageCropper plugin for native uCrop functionality
         try {
             @SuppressWarnings("unchecked")
@@ -98,10 +109,19 @@ public class MainActivity extends BridgeActivity {
         
         Log.d("MainActivity", "=== CUSTOM PLUGIN REGISTRATION COMPLETE ===");
         
+        // Mark plugin registration complete
+        
+        // Mark WebView init start
+        
         // Call super.onCreate AFTER registering custom plugins
         super.onCreate(savedInstanceState);
         
+        // Mark WebView init end
+        
         Log.d("MainActivity", "=== CAPACITOR INITIALIZATION COMPLETE ===");
+        
+        // Configure status bar to not overlay WebView content
+        configureStatusBar();
         
         // Initialize centralized bridge coordination
         BridgeCoordinator.getInstance().initialize(bridge);
@@ -128,6 +148,63 @@ public class MainActivity extends BridgeActivity {
         
         // Set up automatic JWT token monitoring  
         setupJwtTokenMonitoring();
+        
+        // Handle deep link if app was launched with one
+        handleDeepLinkIntent(getIntent());
+        
+        // Mark onCreate complete
+    }
+    
+    /**
+     * Handle new intents - important for deep linking when app is already running
+     */
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        
+        Log.d(TAG, "🔗 onNewIntent called");
+        
+        // Set the new intent as the current intent
+        setIntent(intent);
+        
+        // Handle deep link if present
+        handleDeepLinkIntent(intent);
+    }
+    
+    /**
+     * Handle deep link from intent (launch or new intent)
+     */
+    private void handleDeepLinkIntent(Intent intent) {
+        if (intent != null && Intent.ACTION_VIEW.equals(intent.getAction())) {
+            Uri data = intent.getData();
+            if (data != null && "photoshare".equals(data.getScheme())) {
+                Log.d(TAG, "🔗 Processing deep link: " + data.toString());
+                
+                // Notify web app about the deep link
+                String script = String.format(
+                    "if (window.handlePhotoShareDeepLink) { " +
+                    "  console.log('🔗 [ANDROID] Processing deep link:', '%s'); " +
+                    "  window.handlePhotoShareDeepLink('%s'); " +
+                    "} else { " +
+                    "  console.log('🔗 [ANDROID] Storing deep link for later processing:', '%s'); " +
+                    "  window._pendingDeepLink = '%s'; " +
+                    "}",
+                    data.toString(),
+                    data.toString(),
+                    data.toString(),
+                    data.toString()
+                );
+                
+                // Execute JavaScript with a slight delay to ensure web app is ready
+                new Handler().postDelayed(() -> {
+                    bridge.getWebView().evaluateJavascript(script, null);
+                }, 500);
+                
+                // Clear the intent data to prevent re-processing
+                intent.setAction(null);
+                intent.setData(null);
+            }
+        }
     }
     
     private void verifyPluginRegistration() {
@@ -1786,5 +1863,90 @@ public class MainActivity extends BridgeActivity {
         super.onDestroy();
         // Clear static instance to prevent memory leaks
         instance = null;
+    }
+    
+    /**
+     * Configure status bar to not overlay WebView content
+     * Implements proper WindowInsets handling for Android 15/API 35 compatibility
+     */
+    private void configureStatusBar() {
+        Log.d("MainActivity", "🎨 Configuring status bar with WindowInsets for Android 15 compatibility");
+        
+        // First, ensure the activity window doesn't draw under system bars
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            // Make status bar transparent but don't draw content under it
+            getWindow().setStatusBarColor(android.graphics.Color.TRANSPARENT);
+            
+            // Remove any flags that cause content to draw under system bars
+            getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            );
+            
+            Log.d("MainActivity", "✅ Window flags configured for stable layout");
+        }
+        
+        // Get the root view of the activity
+        View rootView = findViewById(android.R.id.content);
+        if (rootView != null) {
+            // Apply WindowInsets listener for proper padding
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                rootView.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
+                    @Override
+                    public android.view.WindowInsets onApplyWindowInsets(View v, android.view.WindowInsets insets) {
+                        int statusBarHeight = insets.getSystemWindowInsetTop();
+                        int navBarHeight = insets.getSystemWindowInsetBottom();
+                        
+                        Log.d("MainActivity", "📏 WindowInsets - Status bar: " + statusBarHeight + "px, Nav bar: " + navBarHeight + "px");
+                        
+                        // Apply padding to the root content view
+                        v.setPadding(0, statusBarHeight, 0, 0); // Only apply top padding, not bottom
+                        
+                        // Also try to apply to WebView directly
+                        if (getBridge() != null && getBridge().getWebView() != null) {
+                            WebView webView = getBridge().getWebView();
+                            
+                            // Don't apply body padding since we're handling it at the container level
+                            // Just inject CSS variables for the web app to use if needed
+                            String safeAreaScript = 
+                                "console.log('🎨 Applying WindowInsets safe area from Android');" +
+                                "var style = document.getElementById('android-safe-area') || document.createElement('style');" +
+                                "style.id = 'android-safe-area';" +
+                                "style.innerHTML = ':root {" +
+                                "  --safe-area-inset-top: " + statusBarHeight + "px !important;" +
+                                "  --safe-area-inset-bottom: " + navBarHeight + "px !important;" +
+                                "  --android-status-bar-height: " + statusBarHeight + "px !important;" +
+                                "}';" +
+                                "if (!document.getElementById('android-safe-area')) {" +
+                                "  document.head.appendChild(style);" +
+                                "}" +
+                                "// Don't apply body padding - let the web app handle it" +
+                                "console.log('✅ Safe area CSS variables set - top: " + statusBarHeight + "px, bottom: " + navBarHeight + "px');" +
+                                "console.log('📏 Status bar height detected: ' + " + statusBarHeight + " + 'px');";
+                            
+                            webView.evaluateJavascript(safeAreaScript, result -> {
+                                Log.d("MainActivity", "✅ Safe area CSS injection complete - status bar: " + statusBarHeight + "px");
+                            });
+                        }
+                        
+                        // Consume the insets so they're not applied again
+                        return insets.consumeSystemWindowInsets();
+                    }
+                });
+                
+                // Request a layout pass to apply the insets
+                rootView.requestApplyInsets();
+            } else {
+                // Fallback for older Android versions
+                int statusBarHeight = 0;
+                int resourceId = getResources().getIdentifier("status_bar_height", "dimen", "android");
+                if (resourceId > 0) {
+                    statusBarHeight = getResources().getDimensionPixelSize(resourceId);
+                }
+                rootView.setPadding(0, statusBarHeight, 0, 0);
+                Log.d("MainActivity", "✅ Applied fallback padding: " + statusBarHeight + "px");
+            }
+        } else {
+            Log.e("MainActivity", "❌ Unable to find root view for WindowInsets configuration");
+        }
     }
 }

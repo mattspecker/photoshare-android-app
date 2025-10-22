@@ -3,7 +3,7 @@
   "appName": "PhotoShare",
   "webDir": "www",
   "server": {
-    "url": "https://photo-share.app",
+    "url": "https://photoshare.ai",
     "cleartext": false
   },
   "android": {
@@ -35,7 +35,7 @@
       "enabled": true
     },
     "SafeArea": {
-      "enabled": true,
+      "enabled": false,
       "customColorsForSystemBars": true,
       "statusBarColor": "#00000000",
       "statusBarContent": "light",
@@ -66,6 +66,7 @@
     "app.photoshare.AutoUploadPlugin",
     "app.photoshare.EnhancedCameraPlugin",
     "app.photoshare.CameraPreviewReplacementPlugin",
-    "app.photoshare.NativeGalleryPlugin"
+    "app.photoshare.NativeGalleryPlugin",
+    "app.photoshare.DeepLinkRouter"
   ]
 }

@@ -9,7 +9,7 @@ import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import { Device } from '@capacitor/device';
 import { App } from '@capacitor/app';
 import { Capacitor, registerPlugin } from '@capacitor/core';
-import { PushNotifications } from '@capacitor/push-notifications';
+import { FirebaseMessaging } from '@capacitor-firebase/messaging';
 
 // Register custom EventPhotoPicker plugin
 const EventPhotoPicker = registerPlugin('EventPhotoPicker');
@@ -1154,15 +1154,15 @@ export async function initializePushNotifications(context = null) {
     console.log('🔔 [PUSH INIT] Platform:', Capacitor.getPlatform());
     console.log('🔔 [PUSH INIT] Is native app:', Capacitor.isNativePlatform());
     
-    if (!Capacitor.isPluginAvailable('PushNotifications')) {
-      console.log('❌ [PUSH INIT] PushNotifications plugin not available');
+    if (!Capacitor.isPluginAvailable('FirebaseMessaging')) {
+      console.log('❌ [PUSH INIT] FirebaseMessaging plugin not available');
       return { success: false, reason: 'plugin_unavailable' };
     }
-    console.log('✅ [PUSH INIT] PushNotifications plugin available');
+    console.log('✅ [PUSH INIT] FirebaseMessaging plugin available');
     
     // Check current permissions first
     console.log('🔔 [PUSH INIT] Checking current permissions...');
-    const currentPermissions = await PushNotifications.checkPermissions();
+    const currentPermissions = await FirebaseMessaging.checkPermissions();
     console.log('🔔 [PUSH INIT] Current permissions:', currentPermissions);
     
     // If already granted, proceed directly
@@ -1174,7 +1174,7 @@ export async function initializePushNotifications(context = null) {
     } else {
       // Need to request permission - this will show the system dialog
       console.log('🔔 [PUSH INIT] Requesting permissions from user...');
-      const permissionResult = await PushNotifications.requestPermissions();
+      const permissionResult = await FirebaseMessaging.requestPermissions();
       console.log('🔔 [PUSH INIT] Permission result:', permissionResult);
       
       if (permissionResult.receive !== 'granted') {
@@ -1183,10 +1183,10 @@ export async function initializePushNotifications(context = null) {
       }
     }
     
-    // Register with FCM to get token
-    console.log('🔔 [PUSH INIT] Registering with FCM to get token...');
-    await PushNotifications.register();
-    console.log('✅ [PUSH INIT] FCM registration initiated');
+    // Get FCM token directly
+    console.log('🔔 [PUSH INIT] Getting FCM token...');
+    const tokenResult = await FirebaseMessaging.getToken();
+    console.log('✅ [PUSH INIT] FCM token received:', tokenResult.token?.substring(0, 20) + '...');
     
     // Set up listeners that will handle the token
     console.log('🔔 [PUSH INIT] Setting up token and notification listeners...');
@@ -1202,19 +1202,19 @@ export async function initializePushNotifications(context = null) {
 }
 
 function setupSimplePushListeners() {
-  console.log('🔔 [LISTENERS] Setting up push notification listeners...');
+  console.log('🔔 [LISTENERS] Setting up Firebase messaging listeners...');
   
   // Get FCM token
-  PushNotifications.addListener('registration', (token) => {
+  FirebaseMessaging.addListener('tokenReceived', (token) => {
     console.log('🎯 [FCM TOKEN] *** FIREBASE TOKEN RECEIVED ***');
-    console.log('🎯 [FCM TOKEN] Token:', token.value);
-    console.log('🎯 [FCM TOKEN] Token length:', token.value?.length);
-    fcmToken = token.value;
+    console.log('🎯 [FCM TOKEN] Token:', token.token);
+    console.log('🎯 [FCM TOKEN] Token length:', token.token?.length);
+    fcmToken = token.token;
     
     // Make token available to web
-    window.fcmToken = token.value;
+    window.fcmToken = token.token;
     if (window.localStorage) {
-      window.localStorage.setItem('fcm_token', token.value);
+      window.localStorage.setItem('fcm_token', token.token);
       console.log('💾 [FCM TOKEN] Stored in localStorage');
     }
     
@@ -1226,7 +1226,7 @@ function setupSimplePushListeners() {
     const registerToken = async () => {
       if (!tokenRegistered) {
         console.log('🔗 [FCM TOKEN] Auth state changed, attempting immediate registration...');
-        const success = await registerFCMTokenWithAuthCheck(token.value);
+        const success = await registerFCMTokenWithAuthCheck(token.token);
         if (success) {
           tokenRegistered = true;
         }
@@ -1265,11 +1265,46 @@ function setupSimplePushListeners() {
   });
   
   // Add registration error listener
-  PushNotifications.addListener('registrationError', (error) => {
+  FirebaseMessaging.addListener('registrationError', (error) => {
     console.error('❌ [FCM ERROR] Registration failed:', error);
   });
   
-  console.log('✅ [LISTENERS] Push notification listeners setup complete');
+  // Handle notification action (tap)
+  FirebaseMessaging.addListener('notificationActionPerformed', (action) => {
+    console.log('👆 [DEEP LINK] Notification tapped:', action);
+    
+    // Extract deep link data from notification
+    const data = action.notification?.data || {};
+    const deepLink = data.deepLink;
+    
+    console.log('🔗 [DEEP LINK] Extracted from notification:', deepLink);
+    
+    if (deepLink && deepLink.startsWith('photoshare://')) {
+      console.log('🔗 [DEEP LINK] Processing:', deepLink);
+      
+      // Call DeepLinkRouter to handle the deep link
+      if (window.Capacitor?.Plugins?.DeepLinkRouter) {
+        window.Capacitor.Plugins.DeepLinkRouter.handleDeepLink({ deepLink: deepLink })
+          .then(result => {
+            console.log('✅ [DEEP LINK] Handled successfully:', result);
+          })
+          .catch(error => {
+            console.error('❌ [DEEP LINK] Failed to handle:', error);
+          });
+      } else {
+        console.error('❌ [DEEP LINK] DeepLinkRouter plugin not available');
+      }
+    } else {
+      console.log('⚠️ [DEEP LINK] No valid deep link found in notification data');
+    }
+  });
+  
+  // Handle foreground notifications
+  FirebaseMessaging.addListener('notificationReceived', (notification) => {
+    console.log('📬 [NOTIFICATION] Received in foreground:', notification.title);
+  });
+  
+  console.log('✅ [LISTENERS] Firebase messaging listeners setup complete');
 }
 
 /**
@@ -1413,29 +1448,7 @@ async function attemptTokenRegistration(token, attempt) {
   }
 }
 
-  // Add registration error listener
-  PushNotifications.addListener('registrationError', (error) => {
-    console.error('❌ [FCM ERROR] Registration failed:', error);
-  });
-  
-  // Handle notification tap
-  PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
-    console.log('👆 Notification tapped:', action);
-    
-    const data = action.notification?.data || {};
-    if (data.eventId) {
-      window.location.href = `/event/${data.eventId}`;
-    } else if (data.photoId) {
-      window.location.href = `/photo/${data.photoId}`;
-    } else if (data.url) {
-      window.location.href = data.url;
-    }
-  });
-  
-  // Just log foreground notifications
-  PushNotifications.addListener('pushNotificationReceived', (notification) => {
-    console.log('📬 Notification received:', notification.title);
-  });
+  // (Listeners now handled in setupSimplePushListeners function above)
 }
 
 export function getFCMToken() {
@@ -1444,7 +1457,7 @@ export function getFCMToken() {
 
 export async function checkPushPermissions() {
   try {
-    return await PushNotifications.checkPermissions();
+    return await FirebaseMessaging.checkPermissions();
   } catch (error) {
     console.error('Error checking push permissions:', error);
     return { receive: 'denied' };
@@ -1457,12 +1470,12 @@ export async function canUsePushNotifications() {
     const { Capacitor } = await import('@capacitor/core');
     
     // Check if plugin is available
-    if (!Capacitor.isPluginAvailable('PushNotifications')) {
+    if (!Capacitor.isPluginAvailable('FirebaseMessaging')) {
       return { supported: false, reason: 'plugin_unavailable' };
     }
     
     // Check permissions
-    const permissions = await PushNotifications.checkPermissions();
+    const permissions = await FirebaseMessaging.checkPermissions();
     if (permissions.receive === 'granted') {
       return { supported: true, permissions };
     } else if (permissions.receive === 'denied') {
@@ -1536,10 +1549,10 @@ if (typeof window !== 'undefined') {
       checkPermissions: checkPushPermissions,
       canUsePushNotifications,
       requestPermissions: async () => {
-        return await PushNotifications.requestPermissions();
+        return await FirebaseMessaging.requestPermissions();
       },
-      register: async () => {
-        return await PushNotifications.register();
+      getToken: async () => {
+        return await FirebaseMessaging.getToken();
       }
     },
     AppPermissions: {

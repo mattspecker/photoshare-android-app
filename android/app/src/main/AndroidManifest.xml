@@ -28,6 +28,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- Deep Link Intent Filter for Push Notifications -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="photoshare" />
+            </intent-filter>
+
         </activity>
 
         <activity
@@ -60,16 +68,7 @@
         <!-- MLKit Barcode Scanning Dependencies -->
         <meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="barcode_ui"/>
         
-        <!-- PhotoShare Custom Firebase Messaging Service for Rich Notifications -->
-        <service 
-            android:name=".PhotoShareMessagingService" 
-            android:exported="false"
-            android:enabled="true"
-            android:stopWithTask="false">
-            <intent-filter android:priority="1000">
-                <action android:name="com.google.firebase.MESSAGING_EVENT" />
-            </intent-filter>
-        </service>
+        <!-- PhotoShare Custom Firebase Messaging Service REMOVED - using @capacitor-firebase/messaging instead -->
         
         <!-- Firebase Messaging default settings -->
         <meta-data

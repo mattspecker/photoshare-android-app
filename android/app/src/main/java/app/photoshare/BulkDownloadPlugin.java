@@ -32,6 +32,10 @@ import java.util.ArrayList;
 )
 public class BulkDownloadPlugin extends Plugin {
     private static final String TAG = "BulkDownloadPlugin";
+    private static final long DEBOUNCE_DELAY_MS = 2000; // 2 second debounce
+    private long lastActivityLaunchTime = 0;
+    private String lastEventId = null;
+    private boolean isActivityActive = false;
     
     @Override
     public void load() {
@@ -51,8 +55,43 @@ public class BulkDownloadPlugin extends Plugin {
             String eventName = call.getString("eventName", "Event Photos");
             JSArray photosArray = call.getArray("photos");
             
+            Log.d(TAG, "📥 openBulkDownload called with:");
+            Log.d(TAG, "  - eventId: " + eventId);
+            Log.d(TAG, "  - eventName: " + eventName);
+            Log.d(TAG, "  - photosArray: " + (photosArray != null ? photosArray.length() + " photos" : "null"));
+            Log.d(TAG, "  - isActivityActive: " + isActivityActive);
+            Log.d(TAG, "  - lastEventId: " + lastEventId);
+            Log.d(TAG, "  - lastActivityLaunchTime: " + lastActivityLaunchTime);
+            
             if (eventId == null || eventId.isEmpty()) {
+                Log.e(TAG, "❌ Event ID is required");
                 call.reject("Event ID is required");
+                return;
+            }
+            
+            // DISABLED FOR NOW: Activity tracking causing issues
+            // if (isActivityActive && eventId.equals(lastEventId)) {
+            //     Log.d(TAG, "⚠️ BulkDownload activity already active for event: " + eventId);
+            //     
+            //     JSObject result = new JSObject();
+            //     result.put("success", true);
+            //     result.put("message", "Bulk download already active for this event");
+            //     result.put("alreadyActive", true);
+            //     call.resolve(result);
+            //     return;
+            // }
+            
+            // Check for debounce - prevent multiple launches for same event within debounce window
+            long currentTime = System.currentTimeMillis();
+            if (eventId.equals(lastEventId) && (currentTime - lastActivityLaunchTime) < DEBOUNCE_DELAY_MS) {
+                Log.d(TAG, "⏳ Debouncing duplicate call for event: " + eventId + 
+                    " (time since last: " + (currentTime - lastActivityLaunchTime) + "ms)");
+                
+                JSObject result = new JSObject();
+                result.put("success", true);
+                result.put("message", "Bulk download already launched for this event");
+                result.put("debounced", true);
+                call.resolve(result);
                 return;
             }
             
@@ -71,6 +110,11 @@ public class BulkDownloadPlugin extends Plugin {
                 call.reject("No valid photos found");
                 return;
             }
+            
+            // Update debounce tracking before launching
+            lastActivityLaunchTime = currentTime;
+            lastEventId = eventId;
+            // isActivityActive = true; // Disabled for now
             
             // Launch BulkDownloadActivity
             getActivity().runOnUiThread(() -> {
@@ -102,6 +146,34 @@ public class BulkDownloadPlugin extends Plugin {
             Log.e(TAG, "Error in openBulkDownload: " + e.getMessage(), e);
             call.reject("Failed to process bulk download request: " + e.getMessage());
         }
+    }
+    
+    /**
+     * Reset debounce state - can be called when download activity is closed
+     */
+    @PluginMethod
+    public void resetDebounce(PluginCall call) {
+        lastActivityLaunchTime = 0;
+        lastEventId = null;
+        isActivityActive = false;
+        Log.d(TAG, "✅ Debounce state reset");
+        
+        JSObject result = new JSObject();
+        result.put("success", true);
+        call.resolve(result);
+    }
+    
+    /**
+     * Mark activity as closed - should be called when BulkDownloadActivity is destroyed
+     */
+    @PluginMethod
+    public void markActivityClosed(PluginCall call) {
+        isActivityActive = false;
+        Log.d(TAG, "✅ BulkDownload activity marked as closed");
+        
+        JSObject result = new JSObject();
+        result.put("success", true);
+        call.resolve(result);
     }
     
     /**

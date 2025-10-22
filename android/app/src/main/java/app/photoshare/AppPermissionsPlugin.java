@@ -660,6 +660,25 @@ public class AppPermissionsPlugin extends Plugin {
             
             Log.d(TAG, "🔍 hasCompletedOnboarding check: " + completed);
             
+            // If onboarding is marked complete, verify that permissions are actually granted
+            // This handles clean installs where SharedPreferences persist but permissions are reset
+            if (completed) {
+                boolean hasAnyPermissions = checkIfAnyPermissionsGranted();
+                if (!hasAnyPermissions) {
+                    Log.d(TAG, "🔄 CLEAN INSTALL DETECTED: Onboarding marked complete but no permissions granted");
+                    Log.d(TAG, "🔄 Auto-resetting onboarding state for clean install");
+                    
+                    // Reset onboarding state
+                    SharedPreferences.Editor editor = prefs.edit();
+                    editor.putBoolean(KEY_FIRST_LAUNCH, true);
+                    editor.putBoolean(KEY_ONBOARDING_COMPLETE, false);
+                    editor.apply();
+                    
+                    completed = false;
+                    Log.d(TAG, "✅ Onboarding state reset - user will see onboarding flow again");
+                }
+            }
+            
             JSObject result = new JSObject();
             result.put("completed", completed);
             call.resolve(result);
@@ -670,6 +689,39 @@ public class AppPermissionsPlugin extends Plugin {
             result.put("completed", false);
             result.put("error", e.getMessage());
             call.resolve(result);
+        }
+    }
+    
+    /**
+     * Check if any required permissions are actually granted
+     * Used to detect clean installs where SharedPreferences persist but permissions are reset
+     */
+    private boolean checkIfAnyPermissionsGranted() {
+        try {
+            // Check photo permission (most important for this app)
+            String photoPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU 
+                ? android.Manifest.permission.READ_MEDIA_IMAGES
+                : android.Manifest.permission.READ_EXTERNAL_STORAGE;
+                
+            boolean hasPhotos = getActivity().checkSelfPermission(photoPermission) == PackageManager.PERMISSION_GRANTED;
+            
+            // Check camera permission
+            boolean hasCamera = getActivity().checkSelfPermission(android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
+            
+            // Check notification permission (Android 13+)
+            boolean hasNotifications = true; // Default to true for older Android versions
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                hasNotifications = getActivity().checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
+            }
+            
+            Log.d(TAG, "🔍 Permission check - Photos: " + hasPhotos + ", Camera: " + hasCamera + ", Notifications: " + hasNotifications);
+            
+            // Return true if ANY critical permission is granted (photos is most important)
+            return hasPhotos || hasCamera;
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Error checking permissions", e);
+            return false; // If we can't check, assume no permissions
         }
     }
     

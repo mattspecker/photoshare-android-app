@@ -4,7 +4,8 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="@drawable/photoshare_main_background">
+    android:background="#ffffff"
+    android:fitsSystemWindows="true">
 
 
     <!-- Event Info -->
@@ -14,7 +15,7 @@
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:padding="16dp"
-        android:background="#1F1B2E">
+        android:background="#ffffff">
 
         <TextView
             android:id="@+id/tv_event_name"
@@ -22,17 +23,18 @@
             android:layout_height="wrap_content"
             android:text="Event Name"
             android:textSize="16sp"
-            android:textStyle="bold"
-            android:textColor="#C084FC" />
+            android:textColor="#000000"
+            android:fontFamily="@font/outfit_semibold" />
 
         <TextView
             android:id="@+id/tv_event_dates"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Event Dates"
-            android:textSize="14sp"
-            android:textColor="#D1D5DB"
-            android:layout_marginTop="4dp" />
+            android:textSize="12sp"
+            android:textColor="#64748b"
+            android:layout_marginTop="4dp"
+            android:fontFamily="@font/outfit_regular" />
 
         <!-- Photo Count Info -->
         <LinearLayout
@@ -47,16 +49,18 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="0 photos"
-                android:textSize="13sp"
-                android:textColor="#9CA3AF" />
+                android:textSize="12sp"
+                android:textColor="#64748b"
+                android:fontFamily="@font/outfit_regular" />
 
             <TextView
                 android:id="@+id/tv_selected_count"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="0 selected"
-                android:textSize="13sp"
-                android:textColor="#4F9BFF" />
+                android:textSize="12sp"
+                android:textColor="#64748b"
+                android:fontFamily="@font/outfit_regular" />
 
         </LinearLayout>
 
@@ -99,8 +103,9 @@
                 android:layout_height="wrap_content"
                 android:text="Checking for duplicates..."
                 android:textSize="16sp"
-                android:textColor="#FAFAFA"
-                android:layout_marginTop="16dp" />
+                android:textColor="#000000"
+                android:layout_marginTop="16dp"
+                android:fontFamily="@font/outfit_semibold" />
                 
         </LinearLayout>
         
@@ -112,7 +117,7 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:padding="16dp"
-        android:background="#1A1A1F"
+        android:background="#ffffff"
         android:elevation="4dp">
 
         <Button
@@ -121,10 +126,17 @@
             android:layout_height="48dp"
             android:layout_weight="1"
             android:text="Cancel"
-            android:textColor="#9CA3AF"
-            android:background="@android:color/transparent"
+            android:textColor="#020817"
+            android:textSize="14sp"
+            android:background="@drawable/secondary_button_background"
+            android:fontFamily="@font/outfit_medium"
             android:layout_marginEnd="8dp"
-            style="?android:attr/borderlessButtonStyle" />
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"
+            android:stateListAnimator="@null"
+            android:elevation="0dp" />
 
         <Button
             android:id="@+id/btn_select"
@@ -132,8 +144,16 @@
             android:layout_height="48dp"
             android:layout_weight="1"
             android:text="Select Photos"
-            android:textColor="#FAFAFA"
-            android:background="@drawable/photoshare_button_selector"
+            android:textColor="#020817"
+            android:textSize="14sp"
+            android:background="@drawable/secondary_button_background"
+            android:fontFamily="@font/outfit_medium"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"
+            android:stateListAnimator="@null"
+            android:elevation="0dp"
             android:layout_marginStart="8dp"
             android:enabled="false" />
 

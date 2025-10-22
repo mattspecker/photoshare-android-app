@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an Android WebView application for PhotoShare, built with Kotlin. The app provides a native wrapper around the PhotoShare web application (https://photo-share.app), allowing users to:
+This is an Android WebView application for PhotoShare, built with Kotlin. The app provides a native wrapper around the PhotoShare web application (https://photoshare.ai), allowing users to:
 - Access the full PhotoShare web interface in a native Android app
 - Benefit from native Android integration and performance
 - Use camera and photo features through the web interface
@@ -77,7 +77,7 @@ cd android && ./gradlew installDebug
 
 ### Key Features
 
-- **WebView Integration**: Loads https://photo-share.app in a native Android WebView
+- **WebView Integration**: Loads https://photoshare.ai in a native Android WebView
 - **Google SSO Integration**: Native Google Sign-In with OAuth 2.0 support
 - **JavaScript Bridge**: Communication between web and native Google Auth
 - **EventPhotoPicker Plugin**: Native photo picker with event-aware date filtering

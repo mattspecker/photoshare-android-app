@@ -7,21 +7,31 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.JSObject;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @CapacitorPlugin(name = "AutoUpload")
 public class AutoUploadPlugin extends Plugin {
     private static final String TAG = "AutoUploadPlugin";
+    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    
+    @Override
+    protected void handleOnDestroy() {
+        // Cleanup executor when plugin is destroyed
+        executor.shutdown();
+        super.handleOnDestroy();
+    }
 
     @PluginMethod
     public void checkAndUploadPhotos(PluginCall call) {
         Log.d(TAG, "🔍 Auto-upload check triggered from JavaScript");
         
-        // Ensure we're on the main thread for WebView operations
-        getActivity().runOnUiThread(() -> {
+        // Show initial overlay on UI thread
+        showOverlay("Checking for photos...", "Scanning current event");
+        
+        // Run the heavy work in background thread
+        executor.execute(() -> {
             try {
-                // Show initial overlay
-                showOverlay("Checking for photos...", "Scanning current event");
-                
                 // Use JavaScript to scan for and upload photos with real event data
                 String script = 
                     "(async function() {" +
@@ -235,14 +245,24 @@ public class AutoUploadPlugin extends Plugin {
                     "  console.log('🔍 Auto-upload: Final result:', window._autoUploadResult);" +
                     "})()";
                 
-                getBridge().getWebView().evaluateJavascript(script, (result) -> {
-                    Log.d(TAG, "📅 Upload check script executed with result: " + result);
-                    
-                    // Start polling after a short delay to let the async function run
-                    getBridge().getWebView().postDelayed(() -> {
-                        Log.d(TAG, "🔍 Starting polling for results");
-                        pollForResult(call, 0);
-                    }, 1000); // Wait 1 second for the async function to complete
+                // JavaScript evaluation needs to be on UI thread
+                getActivity().runOnUiThread(() -> {
+                    getBridge().getWebView().evaluateJavascript(script, (result) -> {
+                        Log.d(TAG, "📅 Upload check script executed with result: " + result);
+                        
+                        // Continue polling in background thread
+                        executor.execute(() -> {
+                            try {
+                                Thread.sleep(1000); // Wait 1 second for the async function to complete
+                                Log.d(TAG, "🔍 Starting polling for results");
+                                pollForResult(call, 0);
+                            } catch (InterruptedException e) {
+                                Log.e(TAG, "❌ Polling interrupted: " + e.getMessage());
+                                hideOverlay();
+                                call.reject("Polling interrupted");
+                            }
+                        });
+                    });
                 });
                 
             } catch (Exception e) {
@@ -254,6 +274,7 @@ public class AutoUploadPlugin extends Plugin {
     }
     
     private void pollForResult(PluginCall call, int attempt) {
+        // This method is already running on background thread from executor
         if (attempt >= 10) { // 5 seconds max
             Log.e(TAG, "❌ Timeout waiting for upload result after " + attempt + " attempts");
             hideOverlay();
@@ -275,10 +296,13 @@ public class AutoUploadPlugin extends Plugin {
             "  return null;" +
             "})();";
         
+        // Only jump to UI thread for JavaScript evaluation
         getActivity().runOnUiThread(() -> {
             getBridge().getWebView().evaluateJavascript(checkScript, (result) -> {
-            Log.d(TAG, "📊 Poll attempt " + attempt + " result: " + result);
-            if (result != null && !result.equals("null")) {
+                // Process result in background thread
+                executor.execute(() -> {
+                    Log.d(TAG, "📊 Poll attempt " + attempt + " result: " + result);
+                    if (result != null && !result.equals("null")) {
                 try {
                     // Clean up the result string - remove extra quotes and handle escaping
                     String cleanResult = result.trim();
@@ -352,9 +376,17 @@ public class AutoUploadPlugin extends Plugin {
                     call.reject("Error parsing upload result: " + e.getMessage());
                 }
             } else {
-                // Keep polling
-                getBridge().getWebView().postDelayed(() -> pollForResult(call, attempt + 1), 500);
+                // Keep polling - wait in background thread then poll again
+                try {
+                    Thread.sleep(500); // Wait 500ms before next poll
+                    pollForResult(call, attempt + 1);
+                } catch (InterruptedException e) {
+                    Log.e(TAG, "❌ Polling interrupted: " + e.getMessage());
+                    hideOverlay();
+                    call.reject("Polling interrupted");
+                }
             }
+                });
             });
         });
     }
