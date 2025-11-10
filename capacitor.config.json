@@ -37,12 +37,13 @@
     },
     "SafeArea": {
       "enabled": false,
-      "customColorsForSystemBars": true,
-      "statusBarColor": "#00000000",
-      "statusBarContent": "light",
-      "navigationBarColor": "#00000000",
-      "navigationBarContent": "light",
+      "customColorsForSystemBars": false,
       "offset": 0
+    },
+    "StatusBar": {
+      "style": "Default",
+      "backgroundColor": "#FFFFFF",
+      "overlaysWebView": false
     },
     "SplashScreen": {
       "launchShowDuration": 2000,
@@ -70,6 +71,7 @@
     "app.photoshare.CameraPreviewReplacementPlugin",
     "app.photoshare.NativeGalleryPlugin",
     "app.photoshare.DeepLinkRouter",
-    "app.photoshare.ContentModerationPlugin"
+    "app.photoshare.ContentModerationPlugin",
+    "app.photoshare.ThemePlugin"
   ]
 }

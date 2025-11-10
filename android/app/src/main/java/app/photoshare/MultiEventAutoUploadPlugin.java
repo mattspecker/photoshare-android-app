@@ -1230,15 +1230,50 @@ public class MultiEventAutoUploadPlugin extends Plugin {
                 return;
             }
             
-            Log.d(TAG, "✅ Auto-upload is ENABLED in web settings - proceeding with overlay");
+            Log.d(TAG, "✅ Auto-upload is ENABLED in web settings - checking for events first...");
             
-            // Must run on UI thread
-            new Handler(Looper.getMainLooper()).post(() -> {
+            // CRITICAL FIX: Check for events BEFORE showing overlay (following iOS pattern)
+            java.util.concurrent.CompletableFuture.runAsync(() -> {
                 try {
-                    createNativeOverlay();
-                    startAutoUploadProcessWithTokens(userId, accessToken);
+                    // Step 1: Get events silently (no overlay yet)
+                    Log.d(TAG, "🔍 Pre-checking for auto-upload events (silent API call)...");
+                    
+                    UserEventsApiClient preCheckClient = new UserEventsApiClient(getContext());
+                    String eventsJson = preCheckClient.getUserEvents(userId, accessToken);
+                    JSONObject responseObj = new JSONObject(eventsJson);
+                    JSONArray events = responseObj.getJSONArray("events");
+                    
+                    Log.d(TAG, "📊 Pre-check found " + events.length() + " events");
+                    
+                    // Step 2: Only create overlay if events exist
+                    if (events.length() == 0) {
+                        Log.d(TAG, "❌ No auto-upload events found - exiting silently (no overlay shown)");
+                        return;
+                    }
+                    
+                    Log.d(TAG, "✅ Found " + events.length() + " auto-upload events - proceeding with overlay");
+                    
+                    // Step 3: NOW create overlay since we confirmed events exist
+                    new Handler(Looper.getMainLooper()).post(() -> {
+                        try {
+                            createNativeOverlay();
+                            startAutoUploadProcessWithTokens(userId, accessToken);
+                        } catch (Exception e) {
+                            Log.e(TAG, "❌ Error creating native overlay: " + e.getMessage(), e);
+                        }
+                    });
+                    
                 } catch (Exception e) {
-                    Log.e(TAG, "❌ Error creating native overlay: " + e.getMessage(), e);
+                    Log.e(TAG, "❌ Error in pre-check: " + e.getMessage(), e);
+                    // On error, proceed with overlay (fail safely)
+                    new Handler(Looper.getMainLooper()).post(() -> {
+                        try {
+                            createNativeOverlay();
+                            startAutoUploadProcessWithTokens(userId, accessToken);
+                        } catch (Exception ex) {
+                            Log.e(TAG, "❌ Error creating native overlay: " + ex.getMessage(), ex);
+                        }
+                    });
                 }
             });
         });
@@ -1257,18 +1292,27 @@ public class MultiEventAutoUploadPlugin extends Plugin {
         // Create overlay container with modern bottom-sheet design
         nativeOverlay = new LinearLayout(getContext());
         
-        // Position at bottom of screen
+        // Position at bottom of screen with proper header clearance to match web app
         FrameLayout.LayoutParams overlayParams = new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT
         );
         overlayParams.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+        
+        // Add top margin to match web app's sticky header height (~52-56px total)
+        // This includes status bar height + web header padding (py-3)
+        int webHeaderHeight = dpToPx(52); // Match web app's header height
+        overlayParams.topMargin = getStatusBarHeight() + webHeaderHeight;
+        
         nativeOverlay.setLayoutParams(overlayParams);
         
         // Modern background with rounded top corners and top border
+        // Get current theme colors
+        ThemeColors themeColors = getCurrentThemeColors();
+        
         // Create main background with rounded top corners
         android.graphics.drawable.GradientDrawable backgroundDrawable = new android.graphics.drawable.GradientDrawable();
-        backgroundDrawable.setColor(Color.WHITE);
+        backgroundDrawable.setColor(Color.parseColor(themeColors.background));
         backgroundDrawable.setCornerRadii(new float[]{
             dpToPx(12), dpToPx(12), // Top left radius (.75rem = 12dp)
             dpToPx(12), dpToPx(12), // Top right radius (.75rem = 12dp)
@@ -1278,7 +1322,7 @@ public class MultiEventAutoUploadPlugin extends Plugin {
         
         // Create top border drawable
         android.graphics.drawable.GradientDrawable topBorderDrawable = new android.graphics.drawable.GradientDrawable();
-        topBorderDrawable.setColor(Color.parseColor("#e2e8f0"));
+        topBorderDrawable.setColor(Color.parseColor(themeColors.border));
         topBorderDrawable.setCornerRadii(new float[]{
             dpToPx(12), dpToPx(12), // Match top corner radius
             dpToPx(12), dpToPx(12), // Match top corner radius
@@ -1325,7 +1369,7 @@ public class MultiEventAutoUploadPlugin extends Plugin {
         try {
             iconContainer.setBackgroundResource(R.drawable.icon_background_blue);
         } catch (Exception e) {
-            iconContainer.setBackgroundColor(Color.parseColor("#E3F2FD")); // Light blue fallback
+            iconContainer.setBackgroundColor(Color.parseColor(themeColors.muted)); // Use theme muted color
         }
         
         // Add upload icon
@@ -1335,7 +1379,7 @@ public class MultiEventAutoUploadPlugin extends Plugin {
         } catch (Exception e) {
             iconImage.setImageResource(android.R.drawable.ic_menu_info_details); // Fallback
         }
-        iconImage.setColorFilter(Color.parseColor("#2B8FFF"), PorterDuff.Mode.SRC_IN);
+        iconImage.setColorFilter(Color.parseColor(themeColors.primary), PorterDuff.Mode.SRC_IN);
         FrameLayout.LayoutParams iconImageParams = new FrameLayout.LayoutParams(
             dpToPx(32), dpToPx(32)
         );
@@ -1377,7 +1421,7 @@ public class MultiEventAutoUploadPlugin extends Plugin {
         // Create main text (top line)
         mainText = new TextView(getContext());
         mainText.setText("Getting Events for Auto Upload");
-        mainText.setTextColor(Color.parseColor("#212121")); // Dark gray like modern design
+        mainText.setTextColor(Color.parseColor(themeColors.foreground)); // Use theme foreground color
         mainText.setTextSize(16); // text-base size (1rem = 16sp)
         mainText.setSingleLine(true);
         mainText.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -1404,7 +1448,7 @@ public class MultiEventAutoUploadPlugin extends Plugin {
         // Create secondary text (bottom line)
         secondaryText = new TextView(getContext());
         secondaryText.setText("Loading event details");
-        secondaryText.setTextColor(Color.parseColor("#64748b")); // text-muted-foreground
+        secondaryText.setTextColor(Color.parseColor(themeColors.secondary)); // Use theme secondary color
         secondaryText.setTextSize(12); // text-xs size (0.75rem = 12sp)
         secondaryText.setSingleLine(true);
         secondaryText.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -1434,7 +1478,7 @@ public class MultiEventAutoUploadPlugin extends Plugin {
         // Create dots text for animation (separate, will be hidden in new design)
         dotsTextView = new TextView(getContext());
         dotsTextView.setText("...");
-        dotsTextView.setTextColor(Color.parseColor("#212121"));
+        dotsTextView.setTextColor(Color.parseColor(themeColors.foreground));
         dotsTextView.setTextSize(14);
         dotsTextView.setVisibility(View.GONE); // Hide dots in new design
         
@@ -1473,7 +1517,7 @@ public class MultiEventAutoUploadPlugin extends Plugin {
         
         // Create upload status text (goes in text/progress container)
         uploadStatusText = new TextView(getContext());
-        uploadStatusText.setTextColor(Color.parseColor("#212121")); // Same as mainText
+        uploadStatusText.setTextColor(Color.parseColor(themeColors.foreground)); // Use theme foreground color
         uploadStatusText.setTextSize(16); // text-base size (1rem = 16sp) - same as mainText
         uploadStatusText.setGravity(Gravity.LEFT); // Left align for better layout
         uploadStatusText.setVisibility(View.GONE); // Initially hidden
@@ -1515,7 +1559,7 @@ public class MultiEventAutoUploadPlugin extends Plugin {
         // Create simple close button as TextView in top right
         TextView closeButton = new TextView(getContext());
         closeButton.setText("×");
-        closeButton.setTextColor(Color.parseColor("#212121")); // Same color as overlay text
+        closeButton.setTextColor(Color.parseColor(themeColors.foreground)); // Use theme foreground color
         closeButton.setTextSize(TypedValue.COMPLEX_UNIT_PX, dpToPx(16)); // 16px text size
         closeButton.setBackgroundColor(Color.TRANSPARENT);
         closeButton.setPadding(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(8)); // Even padding for click area
@@ -1840,6 +1884,7 @@ public class MultiEventAutoUploadPlugin extends Plugin {
      */
     private boolean getWebAutoUploadSettings(String userId) {
         String script = String.format(
+            "(() => {" +
             "const settingsKey = 'auto-upload-settings-%s';" +
             "const settings = localStorage.getItem(settingsKey);" +
             "if (settings) {" +
@@ -1849,7 +1894,8 @@ public class MultiEventAutoUploadPlugin extends Plugin {
             "} else {" +
             "  console.log('🔍 [ANDROID] No auto-upload settings found in localStorage');" +
             "  return false;" +
-            "}",
+            "}" +
+            "})();",
             userId
         );
         
@@ -1889,6 +1935,7 @@ public class MultiEventAutoUploadPlugin extends Plugin {
      */
     private boolean getWebWifiOnlySettings(String userId) {
         String script = String.format(
+            "(() => {" +
             "const settingsKey = 'auto-upload-settings-%s';" +
             "const settings = localStorage.getItem(settingsKey);" +
             "if (settings) {" +
@@ -1896,7 +1943,8 @@ public class MultiEventAutoUploadPlugin extends Plugin {
             "  return parsed.wifiOnlyUpload || false;" +
             "} else {" +
             "  return false;" +
-            "}",
+            "}" +
+            "})();",
             userId
         );
         
@@ -2033,8 +2081,17 @@ public class MultiEventAutoUploadPlugin extends Plugin {
             "  return JSON.stringify(keys);" +
             "})()";
         
-        // Test 5: Can we get a specific key directly?
-        final String test5 = "localStorage.getItem('auto_upload_settings_5ba31dfa-92d2-4bed-88b4-3cc81911a690')";
+        // Test 5: Can we get a specific key directly? (Dynamic user ID)
+        final String test5 = "(() => {" +
+            "try {" +
+                "const authData = localStorage.getItem('sb-jgfcfdlfcnmaripgpepl-auth-token');" +
+                "if (!authData) return null;" +
+                "const parsed = JSON.parse(authData);" +
+                "const userId = parsed.user?.id;" +
+                "if (!userId) return null;" +
+                "return localStorage.getItem('auto_upload_settings_' + userId);" +
+            "} catch(e) { return null; }" +
+        "})()";
         
         // Test 6: Check window.location to verify we're on the right page
         final String test6 = "window.location.href";
@@ -2069,7 +2126,18 @@ public class MultiEventAutoUploadPlugin extends Plugin {
                                     final String actualScript = 
                                         "(() => {" +
                                         "  try {" +
-                                        "    const key = 'auto_upload_settings_5ba31dfa-92d2-4bed-88b4-3cc81911a690';" +
+                                        "    let key = null;" +
+                                        "    try {" +
+                                        "      const authData = localStorage.getItem('sb-jgfcfdlfcnmaripgpepl-auth-token');" +
+                                        "      if (authData) {" +
+                                        "        const parsed = JSON.parse(authData);" +
+                                        "        const userId = parsed.user?.id;" +
+                                        "        if (userId) {" +
+                                        "          key = 'auto_upload_settings_' + userId;" +
+                                        "        }" +
+                                        "      }" +
+                                        "    } catch(e) { console.log('[ANDROID] Error getting user ID:', e); }" +
+                                        "    if (!key) { console.log('[ANDROID] No valid user ID found'); return 'false'; }" +
                                         "    console.log('[ANDROID] Looking for key:', key);" +
                                         "    const value = localStorage.getItem(key);" +
                                         "    console.log('[ANDROID] Raw value from localStorage:', value);" +
@@ -2698,7 +2766,8 @@ public class MultiEventAutoUploadPlugin extends Plugin {
                         String fileHash = PhotoHash.calculateSHA256(getContext(), photoUri);
                         
                         if (fileHash != null) {
-                            String fileName = filePath.substring(filePath.lastIndexOf('/') + 1);
+                            String rawFileName = filePath.substring(filePath.lastIndexOf('/') + 1);
+                            String fileName = sanitizeFileName(rawFileName);
                             if (!uploadedHashes.contains(fileHash)) {
                                 // Add to upload list
                                 photosToUpload.add(new PhotoToUpload(filePath, fileName, dateTaken, fileHash));
@@ -2926,6 +2995,111 @@ public class MultiEventAutoUploadPlugin extends Plugin {
     private int dpToPx(int dp) {
         float density = getContext().getResources().getDisplayMetrics().density;
         return Math.round(dp * density);
+    }
+    
+    /**
+     * Get current theme colors from ThemePlugin
+     */
+    private ThemeColors getCurrentThemeColors() {
+        try {
+            // Check if Theme plugin is available through the bridge
+            if (getBridge() != null && getBridge().getWebView() != null) {
+                // Get theme colors via JavaScript bridge
+                String script = 
+                    "(function() {" +
+                    "  if (window.PhotoShareTheme && typeof window.PhotoShareTheme.getCurrentTheme === 'function') {" +
+                    "    const theme = window.PhotoShareTheme.getCurrentTheme();" +
+                    "    const colors = window.PhotoShareTheme.getWebFallbackColors(theme);" +
+                    "    return { success: true, theme: theme, colors: colors };" +
+                    "  }" +
+                    "  return { success: false, theme: 'light' };" +
+                    "})();";
+                
+                // For now, return default light theme colors
+                // TODO: Implement proper async JavaScript evaluation
+                return getDefaultThemeColors("light");
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to get theme colors, using light theme default", e);
+        }
+        
+        return getDefaultThemeColors("light");
+    }
+    
+    /**
+     * Get default theme colors
+     */
+    private ThemeColors getDefaultThemeColors(String theme) {
+        if ("dark".equals(theme)) {
+            return new ThemeColors(
+                "#020617",  // background (dark)
+                "#F8FAFC",  // foreground (light)
+                "#60A5FA",  // primary (light blue)
+                "#64748B",  // secondary (blue-gray)
+                "#F472B6",  // accent (light pink)
+                "#1E293B",  // muted (dark gray)
+                "#334155"   // border (dark border)
+            );
+        } else {
+            return new ThemeColors(
+                "#FFFFFF",  // background (white)
+                "#020617",  // foreground (dark)
+                "#3B82F6",  // primary (electric blue)
+                "#64748B",  // secondary (blue-gray)
+                "#EC4899",  // accent (vibrant pink)
+                "#F1F5F9",  // muted (light gray)
+                "#E2E8F0"   // border (light border)
+            );
+        }
+    }
+    
+    /**
+     * Helper class to hold theme colors
+     */
+    private static class ThemeColors {
+        final String background;
+        final String foreground;
+        final String primary;
+        final String secondary;
+        final String accent;
+        final String muted;
+        final String border;
+        
+        ThemeColors(String background, String foreground, String primary, String secondary, 
+                   String accent, String muted, String border) {
+            this.background = background;
+            this.foreground = foreground;
+            this.primary = primary;
+            this.secondary = secondary;
+            this.accent = accent;
+            this.muted = muted;
+            this.border = border;
+        }
+    }
+    
+    /**
+     * Get status bar height to prevent overlay from going behind it
+     */
+    private int getStatusBarHeight() {
+        int statusBarHeight = 0;
+        try {
+            int resourceId = getContext().getResources().getIdentifier("status_bar_height", "dimen", "android");
+            if (resourceId > 0) {
+                statusBarHeight = getContext().getResources().getDimensionPixelSize(resourceId);
+            }
+            
+            // Fallback to reasonable default if we can't get the real height
+            if (statusBarHeight == 0) {
+                statusBarHeight = dpToPx(24); // Standard status bar height ~24dp
+            }
+            
+            Log.d(TAG, "📱 Status bar height: " + statusBarHeight + "px");
+        } catch (Exception e) {
+            Log.w(TAG, "Could not get status bar height, using default", e);
+            statusBarHeight = dpToPx(24); // Standard status bar height ~24dp
+        }
+        
+        return statusBarHeight;
     }
     
     /**
@@ -3184,6 +3358,35 @@ public class MultiEventAutoUploadPlugin extends Plugin {
             Log.e(TAG, "❌ Error checking actual photo permission for auto-upload", e);
             return false; // Default to no permission if we can't check
         }
+    }
+    
+    /**
+     * Sanitize filename for server upload by removing invalid characters
+     * @param fileName Original filename
+     * @return Sanitized filename safe for upload
+     */
+    private String sanitizeFileName(String fileName) {
+        if (fileName == null || fileName.trim().isEmpty()) {
+            return "photo.jpg";
+        }
+        
+        // Remove parentheses and other problematic characters
+        // Keep only alphanumeric, dots, dashes, and underscores
+        String sanitized = fileName.replaceAll("[^a-zA-Z0-9._-]", "_");
+        
+        // Remove multiple consecutive underscores
+        sanitized = sanitized.replaceAll("_+", "_");
+        
+        // Remove leading/trailing underscores
+        sanitized = sanitized.replaceAll("^_+|_+$", "");
+        
+        // Ensure it's not empty and has a file extension
+        if (sanitized.isEmpty() || !sanitized.contains(".")) {
+            sanitized = "photo.jpg";
+        }
+        
+        Log.d(TAG, "🔤 Filename sanitized: '" + fileName + "' -> '" + sanitized + "'");
+        return sanitized;
     }
     
 }

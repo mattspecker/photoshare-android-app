@@ -17,6 +17,10 @@ const EventPhotoPicker = registerPlugin('EventPhotoPicker');
 // Register ImageCropper plugin (uCrop for Android native crop)
 const ImageCropper = registerPlugin('ImageCropper');
 
+// Register Theme plugin for light/dark mode management
+const Theme = registerPlugin('Theme');
+
+
 // MODERN CAPACITOR 7 PLUGIN REGISTRATION FOR AppPermissions
 console.log('🚀 Registering AppPermissions using modern Capacitor 7 approach...');
 
@@ -140,6 +144,7 @@ if (window.Capacitor && window.Capacitor.Plugins) {
     window.Capacitor.Plugins.ImageCropper = ImageCropper;
     window.Capacitor.Plugins.AppPermissions = AppPermissions;
     window.Capacitor.Plugins.AppPermissionPlugin = AppPermissions;
+    window.Capacitor.Plugins.Theme = Theme;
 }
 
 // Make AppPermissions available globally for debugging and compatibility
@@ -1595,6 +1600,20 @@ if (typeof window !== 'undefined') {
         return result;
       }
     },
+    Theme: {
+      setTheme: async (theme, fromWeb = true) => {
+        return await Theme.setTheme({ theme, fromWeb });
+      },
+      getTheme: async () => {
+        return await Theme.getTheme();
+      },
+      toggleTheme: async () => {
+        return await Theme.toggleTheme();
+      },
+      getThemeColors: async (theme) => {
+        return await Theme.getThemeColors({ theme });
+      }
+    },
   };
 }
 
@@ -2066,3 +2085,252 @@ console.log('📱 Multi-Event Auto-Upload functions available:');
 console.log('  • window.captureAutoUploadContext() - Capture current user context');
 console.log('  • window.MultiEventAutoUpload.getUserEvents() - Get user events');
 console.log('  • window.MultiEventAutoUpload.checkAllEvents() - Check all events');
+
+// ============================================================================
+// 🎨 PHOTOSHARE THEME BRIDGE 
+// Bridge between PhotoShare web app's theme toggle and Android Theme Plugin
+// ============================================================================
+
+// Global PhotoShare Theme Bridge object
+window.PhotoShareTheme = {
+  // Current theme state
+  currentTheme: 'light',
+  
+  // Initialize theme system
+  async initialize() {
+    console.log('🎨 PhotoShare Theme Bridge: Initializing...');
+    
+    try {
+      // Check if Theme plugin is available
+      if (!Theme) {
+        console.log('⚠️ Theme plugin not available, falling back to web-only theme');
+        return { success: false, reason: 'plugin_unavailable' };
+      }
+      
+      // Get current theme from native
+      const themeResult = await Theme.getTheme();
+      console.log('🎨 Current native theme:', themeResult);
+      
+      if (themeResult && themeResult.theme) {
+        this.currentTheme = themeResult.theme;
+        
+        // Apply theme to web immediately
+        this.applyThemeToWeb(this.currentTheme, false);
+      }
+      
+      // Set up native theme change listener
+      this.setupNativeThemeListener();
+      
+      console.log('✅ PhotoShare Theme Bridge initialized with theme:', this.currentTheme);
+      return { success: true, theme: this.currentTheme };
+      
+    } catch (error) {
+      console.error('❌ Theme initialization failed:', error);
+      return { success: false, error: error.message };
+    }
+  },
+  
+  // Set theme (called from web app's theme toggle)
+  async setTheme(theme) {
+    console.log('🎨 PhotoShare Theme Bridge: Setting theme to', theme);
+    
+    try {
+      // Update native theme
+      if (Theme) {
+        const result = await Theme.setTheme({ theme, fromWeb: true });
+        console.log('✅ Native theme updated:', result);
+        
+        // Update internal state
+        this.currentTheme = theme;
+        
+        // Apply to web (web called us, but might need status bar colors)
+        this.applyThemeToWeb(theme, true);
+        
+        return { success: true, theme: theme, colors: result.colors };
+      } else {
+        // Fallback to web-only
+        this.applyThemeToWeb(theme, true);
+        return { success: true, theme: theme, webOnly: true };
+      }
+    } catch (error) {
+      console.error('❌ Failed to set theme:', error);
+      return { success: false, error: error.message };
+    }
+  },
+  
+  // Toggle between light and dark theme
+  async toggleTheme() {
+    const newTheme = this.currentTheme === 'light' ? 'dark' : 'light';
+    console.log('🔄 PhotoShare Theme Bridge: Toggling from', this.currentTheme, 'to', newTheme);
+    
+    return await this.setTheme(newTheme);
+  },
+  
+  // Get current theme
+  getCurrentTheme() {
+    return this.currentTheme;
+  },
+  
+  // Get theme colors for UI components
+  async getThemeColors(theme = null) {
+    const targetTheme = theme || this.currentTheme;
+    
+    try {
+      if (Theme) {
+        const result = await Theme.getThemeColors({ theme: targetTheme });
+        return result.colors;
+      } else {
+        // Fallback web colors matching Android
+        return this.getWebFallbackColors(targetTheme);
+      }
+    } catch (error) {
+      console.error('❌ Failed to get theme colors:', error);
+      return this.getWebFallbackColors(targetTheme);
+    }
+  },
+  
+  // Apply theme changes to web app
+  applyThemeToWeb(theme, fromNative) {
+    console.log('🌐 Applying theme to web:', theme, 'fromNative:', fromNative);
+    
+    // Update document theme class
+    document.documentElement.classList.remove('light', 'dark');
+    document.documentElement.classList.add(theme);
+    
+    // Update CSS custom properties if available
+    this.updateCSSCustomProperties(theme);
+    
+    // Fire custom event for other web components
+    window.dispatchEvent(new CustomEvent('photoshare-theme-changed', {
+      detail: { 
+        theme: theme, 
+        fromNative: fromNative,
+        colors: this.getWebFallbackColors(theme)
+      }
+    }));
+    
+    // Update localStorage for web persistence
+    localStorage.setItem('photoshare-theme', theme);
+    
+    console.log('✅ Web theme applied:', theme);
+  },
+  
+  // Set up listener for native theme changes (system theme changes)
+  setupNativeThemeListener() {
+    console.log('🎧 Setting up native theme change listener...');
+    
+    // Listen for custom event dispatched by native ThemePlugin
+    window.addEventListener('nativeThemeChange', (event) => {
+      const newTheme = event.detail?.theme;
+      if (newTheme && newTheme !== this.currentTheme) {
+        console.log('📱 Native theme change detected:', newTheme);
+        this.currentTheme = newTheme;
+        this.applyThemeToWeb(newTheme, true);
+      }
+    });
+    
+    console.log('✅ Native theme listener setup complete');
+  },
+  
+  // Handle native theme change (called by ThemePlugin JavaScript injection)
+  onNativeThemeChange(theme) {
+    console.log('🔗 Native theme change callback:', theme);
+    
+    if (theme && theme !== this.currentTheme) {
+      this.currentTheme = theme;
+      this.applyThemeToWeb(theme, true);
+    }
+  },
+  
+  // Update CSS custom properties to match theme
+  updateCSSCustomProperties(theme) {
+    const colors = this.getWebFallbackColors(theme);
+    const root = document.documentElement;
+    
+    // Update CSS custom properties
+    Object.entries(colors).forEach(([key, value]) => {
+      root.style.setProperty(`--photoshare-${key}`, value);
+    });
+    
+    console.log('🎨 CSS custom properties updated for', theme);
+  },
+  
+  // Get fallback colors for web (matching Android ThemePlugin)
+  getWebFallbackColors(theme) {
+    if (theme === 'light') {
+      return {
+        background: '#FFFFFF',      // hsl(0 0% 100%)
+        foreground: '#020617',      // hsl(222.2 84% 4.9%)
+        primary: '#3B82F6',         // Electric Blue
+        secondary: '#64748B',       // Blue-gray
+        accent: '#EC4899',          // Vibrant Pink
+        muted: '#F1F5F9',          // Light gray
+        border: '#E2E8F0'          // Light border
+      };
+    } else {
+      return {
+        background: '#020617',      // hsl(222.2 84% 4.9%)
+        foreground: '#F8FAFC',      // hsl(210 40% 98%)
+        primary: '#60A5FA',         // Light blue
+        secondary: '#64748B',       // Blue-gray
+        accent: '#F472B6',          // Light pink
+        muted: '#1E293B',          // Dark gray
+        border: '#334155'          // Dark border
+      };
+    }
+  },
+  
+  // Test function for development
+  async test() {
+    console.log('🧪 Testing PhotoShare Theme Bridge...');
+    
+    try {
+      // Test theme retrieval
+      const currentTheme = this.getCurrentTheme();
+      console.log('📊 Current theme test:', currentTheme);
+      
+      // Test theme colors
+      const lightColors = await this.getThemeColors('light');
+      const darkColors = await this.getThemeColors('dark');
+      console.log('🎨 Light colors:', lightColors);
+      console.log('🎨 Dark colors:', darkColors);
+      
+      // Test theme toggle
+      console.log('🔄 Testing theme toggle...');
+      const toggleResult = await this.toggleTheme();
+      console.log('✅ Toggle result:', toggleResult);
+      
+      // Toggle back
+      setTimeout(async () => {
+        const toggleBackResult = await this.toggleTheme();
+        console.log('🔄 Toggle back result:', toggleBackResult);
+      }, 2000);
+      
+      return { success: true, message: 'Theme bridge test completed' };
+      
+    } catch (error) {
+      console.error('❌ Theme bridge test failed:', error);
+      return { success: false, error: error.message };
+    }
+  }
+};
+
+// Make Theme available globally for debugging
+window.Theme = Theme;
+
+// Auto-initialize when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => window.PhotoShareTheme.initialize(), 500);
+  });
+} else {
+  // DOM already ready
+  setTimeout(() => window.PhotoShareTheme.initialize(), 500);
+}
+
+console.log('🎨 PhotoShare Theme Bridge available:');
+console.log('  • window.PhotoShareTheme.setTheme(theme) - Set theme from web');
+console.log('  • window.PhotoShareTheme.toggleTheme() - Toggle between themes');
+console.log('  • window.PhotoShareTheme.getCurrentTheme() - Get current theme');
+console.log('  • window.PhotoShareTheme.getThemeColors(theme) - Get theme colors');
+console.log('  • window.PhotoShareTheme.test() - Test all theme functions');

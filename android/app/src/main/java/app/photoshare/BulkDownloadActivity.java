@@ -10,6 +10,7 @@ import android.net.NetworkCapabilities;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -17,6 +18,8 @@ import android.content.ContentValues;
 import android.content.ContentResolver;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Matrix;
+import androidx.exifinterface.media.ExifInterface;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
@@ -57,6 +60,7 @@ public class BulkDownloadActivity extends AppCompatActivity {
     private BulkDownloadPhotoAdapter adapter;
     private View selectionControls;
     private TextView selectionCountText;
+    private TextView headerTitle;
     private Button downloadButton;
     private Button clearButton;
     private Button closeButton;
@@ -74,6 +78,9 @@ public class BulkDownloadActivity extends AppCompatActivity {
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_bulk_download);
+        
+        // Apply dynamic status bar spacing
+        applyStatusBarSpacing();
         
         // Initialize views
         initializeViews();
@@ -97,6 +104,7 @@ public class BulkDownloadActivity extends AppCompatActivity {
         photoGrid = findViewById(R.id.photo_grid);
         selectionControls = findViewById(R.id.selection_controls);
         selectionCountText = findViewById(R.id.selection_count);
+        headerTitle = findViewById(R.id.header_title);
         downloadButton = findViewById(R.id.btn_download);
         clearButton = findViewById(R.id.btn_clear);
         closeButton = findViewById(R.id.btn_close);
@@ -116,6 +124,9 @@ public class BulkDownloadActivity extends AppCompatActivity {
         eventId = intent.getStringExtra(EXTRA_EVENT_ID);
         eventName = intent.getStringExtra(EXTRA_EVENT_NAME);
         
+        // Set dynamic header title
+        updateHeaderTitle();
+        
         // Get photos array from web app (similar to NativeGalleryPlugin pattern)
         ArrayList<GalleryPhotoItem> allPhotos = intent.getParcelableArrayListExtra(EXTRA_PHOTOS_ARRAY);
         
@@ -128,6 +139,24 @@ public class BulkDownloadActivity extends AppCompatActivity {
         
         Log.d(TAG, String.format("Loaded %d total photos, sectioned into %d other + %d mine for event %s", 
             allPhotos.size(), otherPhotos.size(), myPhotos.size(), eventId));
+    }
+    
+    /**
+     * Update header title with dynamic event name
+     */
+    private void updateHeaderTitle() {
+        if (headerTitle != null && eventName != null && !eventName.trim().isEmpty()) {
+            String title = eventName + " Photos";
+            headerTitle.setText(title);
+            Log.d(TAG, "📝 Header title updated to: " + title);
+        } else {
+            // Fallback to generic title if no event name
+            String fallbackTitle = "Event Photos";
+            if (headerTitle != null) {
+                headerTitle.setText(fallbackTitle);
+            }
+            Log.d(TAG, "📝 Using fallback header title: " + fallbackTitle);
+        }
     }
     
     /**
@@ -393,25 +422,18 @@ public class BulkDownloadActivity extends AppCompatActivity {
                 
                 Toast.makeText(this, message, Toast.LENGTH_LONG).show();
                 
-                // Clean up adapter to prevent memory issues
+                // Reset selection state for next download
                 if (adapter != null) {
-                    adapter.setSectionedPhotos(new ArrayList<>(), new ArrayList<>());
-                    adapter = null;
+                    adapter.clearSelection();
+                    // Selection UI will be updated automatically via the adapter listener
                 }
                 
-                // Clear photo lists to free memory
-                if (otherPhotos != null) otherPhotos.clear();
-                if (myPhotos != null) myPhotos.clear();
-                
-                // Return success result and close activity
+                // Return success result but stay on screen for more downloads
                 Intent resultIntent = new Intent();
                 resultIntent.putExtra("downloaded_count", finalSuccessCount);
                 resultIntent.putExtra("failed_count", finalFailCount);
-                resultIntent.putExtra("should_close", true);
+                resultIntent.putExtra("should_close", false); // Changed to false to stay on screen
                 setResult(Activity.RESULT_OK, resultIntent);
-                
-                // Finish activity to return to web view
-                finish();
             });
         });
     }
@@ -430,12 +452,22 @@ public class BulkDownloadActivity extends AppCompatActivity {
             }
             
             InputStream inputStream = connection.getInputStream();
-            Bitmap bitmap = BitmapFactory.decodeStream(inputStream);
+            
+            // Read the image data into a byte array first to preserve EXIF
+            byte[] imageData = readInputStreamToByteArray(inputStream);
             inputStream.close();
             connection.disconnect();
             
+            if (imageData == null || imageData.length == 0) {
+                Log.e(TAG, "Failed to read image data from " + imageUrl);
+                return false;
+            }
+            
+            // Decode bitmap with proper orientation handling
+            Bitmap bitmap = decodeImageWithCorrectOrientation(imageData);
+            
             if (bitmap == null) {
-                Log.e(TAG, "Failed to decode bitmap from " + imageUrl);
+                Log.e(TAG, "Failed to decode/process bitmap from " + imageUrl);
                 return false;
             }
             
@@ -508,6 +540,172 @@ public class BulkDownloadActivity extends AppCompatActivity {
         
         return String.format("PhotoShare_%s_%03d_%s_by_%s.jpg", 
                            eventPrefix, index, photoTitle, uploader);
+    }
+    
+    /**
+     * Read InputStream into byte array to preserve original image data including EXIF
+     */
+    private byte[] readInputStreamToByteArray(InputStream input) throws IOException {
+        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+        int nRead;
+        byte[] data = new byte[16384];
+        
+        while ((nRead = input.read(data, 0, data.length)) != -1) {
+            buffer.write(data, 0, nRead);
+        }
+        
+        return buffer.toByteArray();
+    }
+    
+    /**
+     * Decode image with proper orientation handling using EXIF data
+     */
+    private Bitmap decodeImageWithCorrectOrientation(byte[] imageData) {
+        try {
+            // Create EXIF interface from byte array
+            java.io.ByteArrayInputStream exifStream = new java.io.ByteArrayInputStream(imageData);
+            ExifInterface exif = new ExifInterface(exifStream);
+            
+            // Get orientation from EXIF
+            int orientation = exif.getAttributeInt(
+                ExifInterface.TAG_ORIENTATION, 
+                ExifInterface.ORIENTATION_NORMAL
+            );
+            
+            Log.d(TAG, "Image EXIF orientation: " + orientation);
+            
+            // Decode the bitmap
+            Bitmap bitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData.length);
+            if (bitmap == null) {
+                Log.e(TAG, "Failed to decode bitmap from image data");
+                return null;
+            }
+            
+            // Apply rotation based on EXIF orientation
+            Matrix matrix = new Matrix();
+            switch (orientation) {
+                case ExifInterface.ORIENTATION_ROTATE_90:
+                    matrix.postRotate(90);
+                    Log.d(TAG, "Applying 90° rotation");
+                    break;
+                case ExifInterface.ORIENTATION_ROTATE_180:
+                    matrix.postRotate(180);
+                    Log.d(TAG, "Applying 180° rotation");
+                    break;
+                case ExifInterface.ORIENTATION_ROTATE_270:
+                    matrix.postRotate(270);
+                    Log.d(TAG, "Applying 270° rotation");
+                    break;
+                case ExifInterface.ORIENTATION_FLIP_HORIZONTAL:
+                    matrix.postScale(-1, 1);
+                    Log.d(TAG, "Applying horizontal flip");
+                    break;
+                case ExifInterface.ORIENTATION_FLIP_VERTICAL:
+                    matrix.postScale(1, -1);
+                    Log.d(TAG, "Applying vertical flip");
+                    break;
+                case ExifInterface.ORIENTATION_TRANSPOSE:
+                    matrix.postRotate(90);
+                    matrix.postScale(-1, 1);
+                    Log.d(TAG, "Applying transpose (90° + horizontal flip)");
+                    break;
+                case ExifInterface.ORIENTATION_TRANSVERSE:
+                    matrix.postRotate(270);
+                    matrix.postScale(-1, 1);
+                    Log.d(TAG, "Applying transverse (270° + horizontal flip)");
+                    break;
+                case ExifInterface.ORIENTATION_NORMAL:
+                default:
+                    Log.d(TAG, "No rotation needed (normal orientation)");
+                    return bitmap; // No transformation needed
+            }
+            
+            // Create rotated bitmap
+            try {
+                Bitmap rotatedBitmap = Bitmap.createBitmap(
+                    bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true
+                );
+                
+                // Recycle original bitmap if it's different from rotated
+                if (rotatedBitmap != bitmap) {
+                    bitmap.recycle();
+                }
+                
+                Log.d(TAG, "✅ Successfully applied orientation correction");
+                return rotatedBitmap;
+                
+            } catch (OutOfMemoryError e) {
+                Log.e(TAG, "Out of memory applying orientation correction, returning original", e);
+                return bitmap;
+            }
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Error processing image orientation, falling back to basic decode", e);
+            // Fallback to basic decoding if EXIF processing fails
+            return BitmapFactory.decodeByteArray(imageData, 0, imageData.length);
+        }
+    }
+    
+    /**
+     * Apply dynamic status bar spacing to header
+     */
+    private void applyStatusBarSpacing() {
+        try {
+            // Get the header bar view
+            View headerBar = findViewById(R.id.header_bar);
+            if (headerBar == null) {
+                Log.w(TAG, "Header bar not found, skipping status bar spacing");
+                return;
+            }
+            
+            // Get dynamic status bar height
+            int statusBarHeight = getStatusBarHeight();
+            int additionalPadding = dpToPx(16); // Extra padding for proper spacing
+            
+            // Apply top margin to push header below status bar
+            ViewGroup.MarginLayoutParams params = (ViewGroup.MarginLayoutParams) headerBar.getLayoutParams();
+            params.topMargin = statusBarHeight + additionalPadding;
+            headerBar.setLayoutParams(params);
+            
+            Log.d(TAG, String.format("📱 Applied status bar spacing - height: %dpx + padding: %dpx = %dpx total", 
+                statusBarHeight, additionalPadding, params.topMargin));
+            
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error applying status bar spacing: " + e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Get status bar height for dynamic positioning
+     */
+    private int getStatusBarHeight() {
+        int statusBarHeight = 0;
+        try {
+            int resourceId = getResources().getIdentifier("status_bar_height", "dimen", "android");
+            if (resourceId > 0) {
+                statusBarHeight = getResources().getDimensionPixelSize(resourceId);
+            }
+            
+            // Fallback to reasonable default if we can't get the real height
+            if (statusBarHeight == 0) {
+                statusBarHeight = dpToPx(24); // Standard status bar height ~24dp
+            }
+            
+            Log.d(TAG, "📱 Status bar height: " + statusBarHeight + "px");
+        } catch (Exception e) {
+            Log.w(TAG, "Could not get status bar height, using default", e);
+            statusBarHeight = dpToPx(24); // Standard status bar height ~24dp
+        }
+        
+        return statusBarHeight;
+    }
+    
+    /**
+     * Convert dp to pixels
+     */
+    private int dpToPx(int dp) {
+        float density = getResources().getDisplayMetrics().density;
+        return Math.round(dp * density);
     }
     
     @Override

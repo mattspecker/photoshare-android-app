@@ -26,6 +26,7 @@ import app.photoshare.CameraPreviewReplacementPlugin;
 import app.photoshare.EnhancedCameraPlugin;
 import app.photoshare.AutoUploadPlugin;
 import app.photoshare.NativeGalleryPlugin;
+import app.photoshare.ContentModerationPlugin;
 import java.util.ArrayList;
 
 public class MainActivity extends BridgeActivity {
@@ -89,6 +90,14 @@ public class MainActivity extends BridgeActivity {
         // Register DeepLinkRouter plugin for push notification deep linking
         registerPlugin(DeepLinkRouter.class);
         Log.d("MainActivity", "✅ DeepLinkRouter registered successfully");
+        
+        // Register ContentModeration plugin for client-side content moderation
+        registerPlugin(ContentModerationPlugin.class);
+        Log.d("MainActivity", "✅ ContentModerationPlugin registered successfully");
+        
+        // Register Theme plugin for light/dark mode management
+        registerPlugin(ThemePlugin.class);
+        Log.d("MainActivity", "✅ ThemePlugin registered successfully");
         
         
         // Register ImageCropper plugin for native uCrop functionality
@@ -1947,6 +1956,27 @@ public class MainActivity extends BridgeActivity {
             }
         } else {
             Log.e("MainActivity", "❌ Unable to find root view for WindowInsets configuration");
+        }
+    }
+    
+    @Override
+    public void onConfigurationChanged(android.content.res.Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        
+        // Handle system theme changes
+        Log.d("MainActivity", "🎨 Configuration changed, checking theme");
+        
+        try {
+            // Get ThemePlugin instance and notify of configuration change
+            com.getcapacitor.PluginHandle themePluginHandle = getBridge().getPlugin("Theme");
+            if (themePluginHandle != null) {
+                Plugin themePlugin = themePluginHandle.getInstance();
+                if (themePlugin instanceof ThemePlugin) {
+                    ((ThemePlugin) themePlugin).onConfigurationChanged(newConfig);
+                }
+            }
+        } catch (Exception e) {
+            Log.e("MainActivity", "❌ Error handling configuration change: " + e.getMessage(), e);
         }
     }
 }
