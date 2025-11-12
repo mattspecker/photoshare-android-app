@@ -28,6 +28,8 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * AutoUploadManager handles automatic upload of new photos when:
@@ -42,6 +44,10 @@ public class AutoUploadManager implements DefaultLifecycleObserver {
     private static final String PREF_AUTO_UPLOAD_BACKGROUND = "auto_upload_background_enabled";
     private static final String PREF_AUTO_UPLOAD_WIFI_ONLY = "auto_upload_wifi_only";
     private static final String PREF_LAST_SCAN_TIME = "last_photo_scan_time";
+    
+    // Background thread executor for photo operations
+    private final ExecutorService backgroundExecutor = Executors.newSingleThreadExecutor();
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
     
     private static AutoUploadManager instance;
     private Context context;
@@ -219,72 +225,101 @@ public class AutoUploadManager implements DefaultLifecycleObserver {
         
         Log.d(TAG, "🔍 Checking for new photos since: " + new java.util.Date(lastScanTime));
         
-        List<PhotoItem> newPhotos = getNewPhotosSinceTimestamp(lastScanTime);
-        if (!newPhotos.isEmpty()) {
-            Log.d(TAG, "📸 Found " + newPhotos.size() + " new photos for potential auto-upload");
-            processNewPhotosForAutoUpload(newPhotos);
-        } else {
-            Log.d(TAG, "📸 No new photos found since last scan");
-        }
-        
-        // Update last scan time
-        prefs.edit().putLong(PREF_LAST_SCAN_TIME, currentTime).apply();
+        // Use async photo query to prevent UI blocking
+        getNewPhotosSinceTimestamp(lastScanTime, new PhotoQueryCallback() {
+            @Override
+            public void onSuccess(List<PhotoItem> newPhotos) {
+                if (!newPhotos.isEmpty()) {
+                    Log.d(TAG, "📸 Found " + newPhotos.size() + " new photos for potential auto-upload");
+                    processNewPhotosForAutoUpload(newPhotos);
+                } else {
+                    Log.d(TAG, "📸 No new photos found since last scan");
+                }
+                
+                // Update last scan time after successful query
+                prefs.edit().putLong(PREF_LAST_SCAN_TIME, currentTime).apply();
+            }
+            
+            @Override
+            public void onError(Exception error) {
+                Log.e(TAG, "❌ Failed to check for new photos: " + error.getMessage());
+                // Still update scan time to avoid repeated failures
+                prefs.edit().putLong(PREF_LAST_SCAN_TIME, currentTime).apply();
+            }
+        });
     }
     
     /**
      * Get photos added since a specific timestamp
+     * @param timestamp The timestamp to search from
+     * @param callback Callback to receive the results on the main thread
      */
-    private List<PhotoItem> getNewPhotosSinceTimestamp(long timestamp) {
-        List<PhotoItem> photos = new ArrayList<>();
-        
-        String[] projection = {
-            MediaStore.Images.Media._ID,
-            MediaStore.Images.Media.DATA,
-            MediaStore.Images.Media.DATE_TAKEN,
-            MediaStore.Images.Media.DATE_ADDED,
-            MediaStore.Images.Media.DISPLAY_NAME,
-            MediaStore.Images.Media.SIZE
-        };
-        
-        // Query for photos added since timestamp
-        String selection = MediaStore.Images.Media.DATE_ADDED + " > ?";
-        String[] selectionArgs = { String.valueOf(timestamp / 1000) }; // DATE_ADDED is in seconds
-        
-        try (Cursor cursor = context.getContentResolver().query(
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            projection,
-            selection,
-            selectionArgs,
-            MediaStore.Images.Media.DATE_ADDED + " DESC"
-        )) {
+    private void getNewPhotosSinceTimestamp(long timestamp, PhotoQueryCallback callback) {
+        // Move photo queries to background thread to prevent UI blocking
+        backgroundExecutor.execute(() -> {
+            List<PhotoItem> photos = new ArrayList<>();
             
-            if (cursor != null && cursor.moveToFirst()) {
-                int idIndex = cursor.getColumnIndex(MediaStore.Images.Media._ID);
-                int dataIndex = cursor.getColumnIndex(MediaStore.Images.Media.DATA);
-                int dateTakenIndex = cursor.getColumnIndex(MediaStore.Images.Media.DATE_TAKEN);
-                int dateAddedIndex = cursor.getColumnIndex(MediaStore.Images.Media.DATE_ADDED);
-                int nameIndex = cursor.getColumnIndex(MediaStore.Images.Media.DISPLAY_NAME);
-                int sizeIndex = cursor.getColumnIndex(MediaStore.Images.Media.SIZE);
+            String[] projection = {
+                MediaStore.Images.Media._ID,
+                MediaStore.Images.Media.DATA,
+                MediaStore.Images.Media.DATE_TAKEN,
+                MediaStore.Images.Media.DATE_ADDED,
+                MediaStore.Images.Media.DISPLAY_NAME,
+                MediaStore.Images.Media.SIZE
+            };
+            
+            // Query for photos added since timestamp
+            String selection = MediaStore.Images.Media.DATE_ADDED + " > ?";
+            String[] selectionArgs = { String.valueOf(timestamp / 1000) }; // DATE_ADDED is in seconds
+            
+            try (Cursor cursor = context.getContentResolver().query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                selectionArgs,
+                MediaStore.Images.Media.DATE_ADDED + " DESC"
+            )) {
                 
-                do {
-                    long id = cursor.getLong(idIndex);
-                    String path = cursor.getString(dataIndex);
-                    long dateTaken = cursor.getLong(dateTakenIndex);
-                    long dateAdded = cursor.getLong(dateAddedIndex) * 1000; // Convert to milliseconds
-                    String displayName = cursor.getString(nameIndex);
-                    long size = cursor.getLong(sizeIndex);
+                if (cursor != null && cursor.moveToFirst()) {
+                    int idIndex = cursor.getColumnIndex(MediaStore.Images.Media._ID);
+                    int dataIndex = cursor.getColumnIndex(MediaStore.Images.Media.DATA);
+                    int dateTakenIndex = cursor.getColumnIndex(MediaStore.Images.Media.DATE_TAKEN);
+                    int dateAddedIndex = cursor.getColumnIndex(MediaStore.Images.Media.DATE_ADDED);
+                    int nameIndex = cursor.getColumnIndex(MediaStore.Images.Media.DISPLAY_NAME);
+                    int sizeIndex = cursor.getColumnIndex(MediaStore.Images.Media.SIZE);
                     
-                    Uri photoUri = Uri.withAppendedPath(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
-                    PhotoItem photo = new PhotoItem(id, photoUri, path, dateTaken, dateAdded, displayName, size, 0, 0);
-                    photos.add(photo);
-                    
-                } while (cursor.moveToNext());
+                    do {
+                        long id = cursor.getLong(idIndex);
+                        String path = cursor.getString(dataIndex);
+                        long dateTaken = cursor.getLong(dateTakenIndex);
+                        long dateAdded = cursor.getLong(dateAddedIndex) * 1000; // Convert to milliseconds
+                        String displayName = cursor.getString(nameIndex);
+                        long size = cursor.getLong(sizeIndex);
+                        
+                        Uri photoUri = Uri.withAppendedPath(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
+                        PhotoItem photo = new PhotoItem(id, photoUri, path, dateTaken, dateAdded, displayName, size, 0, 0);
+                        photos.add(photo);
+                        
+                    } while (cursor.moveToNext());
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "❌ Failed to query for new photos: " + e.getMessage(), e);
+                // Post error back to main thread
+                mainHandler.post(() -> callback.onError(e));
+                return;
             }
-        } catch (Exception e) {
-            Log.e(TAG, "❌ Failed to query for new photos: " + e.getMessage(), e);
-        }
-        
-        return photos;
+            
+            // Post results back to main thread
+            mainHandler.post(() -> callback.onSuccess(photos));
+        });
+    }
+    
+    /**
+     * Callback interface for photo query results
+     */
+    private interface PhotoQueryCallback {
+        void onSuccess(List<PhotoItem> photos);
+        void onError(Exception error);
     }
     
     /**
@@ -482,6 +517,23 @@ public class AutoUploadManager implements DefaultLifecycleObserver {
         } catch (Exception e) {
             Log.e(TAG, "Error getting network type: " + e.getMessage(), e);
             return "error";
+        }
+    }
+    
+    /**
+     * Cleanup resources when AutoUploadManager is no longer needed
+     */
+    public void cleanup() {
+        Log.d(TAG, "🧹 Cleaning up AutoUploadManager resources");
+        if (backgroundExecutor != null && !backgroundExecutor.isShutdown()) {
+            backgroundExecutor.shutdown();
+        }
+        if (photoObserver != null) {
+            try {
+                context.getContentResolver().unregisterContentObserver(photoObserver);
+            } catch (Exception e) {
+                Log.w(TAG, "Error unregistering photo observer: " + e.getMessage());
+            }
         }
     }
     

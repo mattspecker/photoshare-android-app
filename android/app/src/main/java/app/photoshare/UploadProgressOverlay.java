@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
@@ -83,6 +84,16 @@ public class UploadProgressOverlay {
     // Method for showing scanning/checking overlay
     public void showScanningOverlay(Activity activity, String message, String subMessage) {
         Log.d(TAG, "🔍 Showing scanning overlay: " + message);
+        
+        // Check if auto-upload is enabled before showing overlay
+        SharedPreferences prefs = activity.getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE);
+        boolean autoUploadEnabled = prefs.getBoolean("autoUploadEnabled", false);
+        Log.d(TAG, "🔍 Auto-upload enabled: " + autoUploadEnabled);
+        
+        if (!autoUploadEnabled) {
+            Log.d(TAG, "⏸️ Auto-upload disabled - not showing scanning overlay");
+            return;
+        }
         
         if (overlayView != null && overlayView.getParent() != null) {
             Log.d(TAG, "⚠️ Overlay already showing, updating message");
@@ -271,6 +282,16 @@ public class UploadProgressOverlay {
     // Enhanced method with event name support
     public void showOverlay(Activity activity, String queueId, int photoCount, String eventName) {
         Log.d(TAG, "🚀 Showing upload progress overlay using Capacitor 7.4.3 ViewOverlay approach for queue: " + queueId);
+        
+        // Check if auto-upload is enabled before showing overlay
+        SharedPreferences prefs = activity.getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE);
+        boolean autoUploadEnabled = prefs.getBoolean("autoUploadEnabled", false);
+        Log.d(TAG, "🔍 Auto-upload enabled: " + autoUploadEnabled);
+        
+        if (!autoUploadEnabled) {
+            Log.d(TAG, "⏸️ Auto-upload disabled - not showing overlay");
+            return;
+        }
         
         activity.runOnUiThread(() -> {
             try {

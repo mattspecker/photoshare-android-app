@@ -48,6 +48,10 @@ import java.util.Base64;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Multi-Event Auto-Upload Plugin
@@ -194,22 +198,17 @@ public class MultiEventAutoUploadPlugin extends Plugin {
     private void checkAuthStateAndTriggerAutoUpload() {
         Log.d(TAG, "🔐 Checking authentication state before auto-upload...");
         
-        // CRITICAL: Move Permission Gate check to background thread to prevent ANR
-        java.util.concurrent.CompletableFuture.runAsync(() -> {
-            try {
-                // CRITICAL: Check Permission Gate in background thread
-                if (!checkPermissionGateWithRetry()) {
-                    Log.d(TAG, "⛔ Auth-triggered auto-upload blocked by Permission Gate - user needs to complete onboarding");
-                    return;
-                }
-                
-                // Continue with auth check on main thread
-                new Handler(Looper.getMainLooper()).post(() -> {
-                    continueAuthStateCheck();
-                });
-            } catch (Exception e) {
-                Log.e(TAG, "❌ Error checking Permission Gate in auth flow: " + e.getMessage(), e);
+        // CRITICAL: Use async Permission Gate check to prevent ANR
+        checkPermissionGateAsync(allowed -> {
+            if (!allowed) {
+                Log.d(TAG, "⛔ Auth-triggered auto-upload blocked by Permission Gate - user needs to complete onboarding");
+                return;
             }
+            
+            // Continue with auth check on main thread
+            new Handler(Looper.getMainLooper()).post(() -> {
+                continueAuthStateCheck();
+            });
         });
     }
     
@@ -683,34 +682,23 @@ public class MultiEventAutoUploadPlugin extends Plugin {
         try {
             Log.d(TAG, "🚀 Starting multi-event auto-upload check");
             
-            // CRITICAL: Move Permission Gate check to background thread to prevent ANR
-            java.util.concurrent.CompletableFuture.runAsync(() -> {
-                try {
-                    // CRITICAL: Check Permission Gate in background thread
-                    if (!checkPermissionGateWithRetry()) {
-                        Log.d(TAG, "⛔ Auto-upload blocked by Permission Gate - user needs to complete onboarding");
-                        new Handler(Looper.getMainLooper()).post(() -> {
-                            JSObject result = new JSObject();
-                            result.put("blocked", true);
-                            result.put("reason", "permissions_pending");
-                            call.resolve(result);
-                        });
-                        return;
-                    }
-                    
-                    // Continue with permission check on main thread
-                    new Handler(Looper.getMainLooper()).post(() -> {
-                        continueCheckAllEventsForPhotos(call);
-                    });
-                } catch (Exception e) {
-                    Log.e(TAG, "❌ Error checking Permission Gate in multi-event flow: " + e.getMessage(), e);
+            // CRITICAL: Use async Permission Gate check to prevent ANR
+            checkPermissionGateAsync(allowed -> {
+                if (!allowed) {
+                    Log.d(TAG, "⛔ Auto-upload blocked by Permission Gate - user needs to complete onboarding");
                     new Handler(Looper.getMainLooper()).post(() -> {
                         JSObject result = new JSObject();
-                        result.put("error", true);
-                        result.put("message", "Permission check failed");
+                        result.put("blocked", true);
+                        result.put("reason", "permissions_pending");
                         call.resolve(result);
                     });
+                    return;
                 }
+                
+                // Continue with permission check on main thread
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    continueCheckAllEventsForPhotos(call);
+                });
             });
         } catch (Exception e) {
             Log.e(TAG, "❌ Error in checkAllEventsForPhotos: " + e.getMessage(), e);
@@ -1153,21 +1141,17 @@ public class MultiEventAutoUploadPlugin extends Plugin {
         Log.d(TAG, "🎨 Creating native auto-upload overlay...");
         
         // CRITICAL: Move Permission Gate check to background thread to prevent ANR
-        java.util.concurrent.CompletableFuture.runAsync(() -> {
-            try {
-                // CRITICAL: Check Permission Gate in background thread
-                if (!checkPermissionGateWithRetry()) {
-                    Log.d(TAG, "⛔ Overlay-triggered auto-upload blocked by Permission Gate - user needs to complete onboarding");
-                    return;
-                }
-                
-                // Continue with overlay creation on main thread
-                new Handler(Looper.getMainLooper()).post(() -> {
-                    continueOverlayAutoUpload();
-                });
-            } catch (Exception e) {
-                Log.e(TAG, "❌ Error checking Permission Gate in overlay flow: " + e.getMessage(), e);
+        // CRITICAL: Use async Permission Gate check to prevent ANR
+        checkPermissionGateAsync(allowed -> {
+            if (!allowed) {
+                Log.d(TAG, "⛔ Overlay-triggered auto-upload blocked by Permission Gate - user needs to complete onboarding");
+                return;
             }
+            
+            // Continue with overlay creation on main thread
+            new Handler(Looper.getMainLooper()).post(() -> {
+                continueOverlayAutoUpload();
+            });
         });
     }
     
@@ -1199,22 +1183,17 @@ public class MultiEventAutoUploadPlugin extends Plugin {
     private void triggerAutoUploadWithTokens(String userId, String accessToken) {
         Log.d(TAG, "🔍 Checking web settings before auto-upload overlay...");
         
-        // CRITICAL: Move Permission Gate check to background thread to prevent ANR
-        java.util.concurrent.CompletableFuture.runAsync(() -> {
-            try {
-                // CRITICAL: Check Permission Gate in background thread
-                if (!checkPermissionGateWithRetry()) {
-                    Log.d(TAG, "⛔ Token-triggered auto-upload blocked by Permission Gate - user needs to complete onboarding");
-                    return;
-                }
-                
-                // Continue with token-based auto-upload on main thread
-                new Handler(Looper.getMainLooper()).post(() -> {
-                    continueTokenAutoUpload(userId, accessToken);
-                });
-            } catch (Exception e) {
-                Log.e(TAG, "❌ Error checking Permission Gate in token flow: " + e.getMessage(), e);
+        // CRITICAL: Use async Permission Gate check to prevent ANR
+        checkPermissionGateAsync(allowed -> {
+            if (!allowed) {
+                Log.d(TAG, "⛔ Token-triggered auto-upload blocked by Permission Gate - user needs to complete onboarding");
+                return;
             }
+            
+            // Continue with token-based auto-upload on main thread
+            new Handler(Looper.getMainLooper()).post(() -> {
+                continueTokenAutoUpload(userId, accessToken);
+            });
         });
     }
     
@@ -1980,6 +1959,45 @@ public class MultiEventAutoUploadPlugin extends Plugin {
     }
     
     /**
+     * Async version of getWebWifiOnlySettings to prevent blocking
+     */
+    private void getWebWifiOnlySettingsAsync(String userId, WifiOnlySettingsCallback callback) {
+        String script = String.format(
+            "(() => {" +
+            "const settingsKey = 'auto-upload-settings-%s';" +
+            "const settings = localStorage.getItem(settingsKey);" +
+            "if (settings) {" +
+            "  const parsed = JSON.parse(settings);" +
+            "  return parsed.wifiOnlyUpload || false;" +
+            "} else {" +
+            "  return false;" +
+            "}" +
+            "})();",
+            userId
+        );
+        
+        try {
+            // Use async approach without blocking
+            new Handler(Looper.getMainLooper()).post(() -> {
+                try {
+                    getBridge().getWebView().evaluateJavascript(script, value -> {
+                        String cleanValue = value != null ? value.replace("\"", "") : "false";
+                        boolean wifiOnly = "true".equals(cleanValue);
+                        Log.d(TAG, "🔍 Web wifi-only enabled: " + wifiOnly);
+                        callback.onResult(wifiOnly);
+                    });
+                } catch (Exception e) {
+                    Log.e(TAG, "❌ Error in async wifi-only settings evaluation: " + e.getMessage());
+                    callback.onResult(false); // Default to allow all networks
+                }
+            });
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error in async wifi-only settings: " + e.getMessage());
+            callback.onResult(false); // Default to allow all networks
+        }
+    }
+    
+    /**
      * Check if web app is ready by verifying Capacitor plugins are available
      */
     private void checkWebAppReadiness(SettingsCallback callback) {
@@ -2210,13 +2228,13 @@ public class MultiEventAutoUploadPlugin extends Plugin {
                 Log.d(TAG, "📤 Triggering auto-upload for user: " + userId);
                 Log.d(TAG, "📋 Using pre-extracted access token: " + accessToken.length() + " characters");
                 
-                // Auto-upload is already confirmed enabled, just get wifi-only setting
-                boolean webWifiOnlyUpload = getWebWifiOnlySettings(userId);
-                
-                Log.d(TAG, "📋 Auto-upload ENABLED, wifi-only: " + webWifiOnlyUpload);
-                
-                // Call checkAllEvents with confirmed enabled setting
-                checkAllEventsInternalWithToken(userId, true, webWifiOnlyUpload, false, accessToken);
+                // Auto-upload is already confirmed enabled, just get wifi-only setting (async)
+                getWebWifiOnlySettingsAsync(userId, webWifiOnlyUpload -> {
+                    Log.d(TAG, "📋 Auto-upload ENABLED, wifi-only: " + webWifiOnlyUpload);
+                    
+                    // Call checkAllEvents with confirmed enabled setting
+                    checkAllEventsInternalWithToken(userId, true, webWifiOnlyUpload, false, accessToken);
+                });
                 
             } catch (Exception e) {
                 Log.e(TAG, "❌ Error in auto-upload process: " + e.getMessage(), e);
@@ -2234,73 +2252,86 @@ public class MultiEventAutoUploadPlugin extends Plugin {
         // CRITICAL: Move ALL heavy operations including Permission Gate to background thread
         java.util.concurrent.CompletableFuture.runAsync(() -> {
             try {
-                // CRITICAL: Check Permission Gate in background thread
-                if (!checkPermissionGateWithRetry()) {
-                    Log.d(TAG, "⛔ Internal auto-upload blocked by Permission Gate - user needs to complete onboarding");
-                    new Handler(Looper.getMainLooper()).post(() -> removeNativeOverlayWithDelay(1000));
-                    return;
-                }
+                // CRITICAL: Check Permission Gate asynchronously to prevent blocking
+                checkPermissionGateAsync(allowed -> {
+                    if (!allowed) {
+                        Log.d(TAG, "⛔ Internal auto-upload blocked by Permission Gate - user needs to complete onboarding");
+                        new Handler(Looper.getMainLooper()).post(() -> removeNativeOverlayWithDelay(1000));
+                        return;
+                    }
+                    
+                    // CRITICAL: Check actual photo permission
+                    if (!hasActualPhotoPermission()) {
+                        Log.d(TAG, "⛔ Internal auto-upload blocked - user has not granted photo/gallery permission");
+                        new Handler(Looper.getMainLooper()).post(() -> removeNativeOverlayWithDelay(1000));
+                        return;
+                    }
+                    
+                    // Step 1: Check global auto-upload setting
+                    if (!autoEnabled) {
+                        Log.d(TAG, "⏸️ Global auto-upload is DISABLED - skipping all events");
+                        removeNativeOverlayWithDelay(1000);
+                        return;
+                    }
+                    
+                    Log.d(TAG, "✅ Global auto-upload is ENABLED - proceeding with checks");
+                    
+                    // Step 2: Check network requirements (WiFi-only setting)
+                    if (wifiOnly) {
+                        Log.d(TAG, "📶 WiFi-only mode enabled - checking network connection...");
+                        
+                        NetworkDetectionResult networkResult = detectNetworkType();
+                        Log.d(TAG, "📶 Network analysis: " + networkResult.toString());
+                        
+                        if (!networkResult.isWiFi) {
+                            Log.d(TAG, "📶 WiFi-only enabled but not on WiFi (" + networkResult.primaryType + ") - skipping");
+                            removeNativeOverlayWithDelay(1000);
+                            return;
+                        }
+                    }
+                    
+                    Log.d(TAG, "📶 Network requirements satisfied - proceeding");
+                    
+                    // Step 3: Get user events - Use async token retrieval to prevent UI blocking
+                    Log.d(TAG, "🔍 Fetching user events for auto-upload check...");
+                    
+                    // Use async token retrieval to prevent UI freezing
+                    getSupabaseAccessTokenAsync(accessToken -> {
+                        if (accessToken == null) {
+                            Log.e(TAG, "❌ Failed to get Supabase access token");
+                            new Handler(Looper.getMainLooper()).post(() -> removeNativeOverlayWithDelay(2000));
+                            return;
+                        }
+                        
+                        Log.d(TAG, "✅ Got access token, fetching user events...");
+                        
+                        // Move API call to background thread to prevent blocking
+                        java.util.concurrent.CompletableFuture.runAsync(() -> {
+                            try {
+                                // Fetch events using real API
+                                String eventsJson = apiClient.getUserEvents(userId, accessToken);
+                                JSONObject responseObj = new JSONObject(eventsJson);
+                                JSONArray events = responseObj.getJSONArray("events");
+                                
+                                Log.d(TAG, "📅 Found " + events.length() + " events for user");
+                                
+                                // Process all events (global auto-upload enabled)
+                                int eventsWithAutoUpload = events.length();
+                                
+                                Log.d(TAG, "📊 Processing all events (global auto-upload enabled): " + eventsWithAutoUpload);
+                                Log.d(TAG, "✅ Auto-upload check completed successfully");
+                                
+                                // Remove overlay after success
+                                new Handler(Looper.getMainLooper()).post(() -> removeNativeOverlayWithDelay(1000));
+                                
+                            } catch (Exception e) {
+                                Log.e(TAG, "❌ Error fetching events: " + e.getMessage(), e);
+                                new Handler(Looper.getMainLooper()).post(() -> removeNativeOverlayWithDelay(2000));
+                            }
+                        });
+                    });
+                }); // End permission gate callback
                 
-                // CRITICAL: Check actual photo permission in background thread
-                if (!hasActualPhotoPermission()) {
-                    Log.d(TAG, "⛔ Internal auto-upload blocked - user has not granted photo/gallery permission");
-                    new Handler(Looper.getMainLooper()).post(() -> removeNativeOverlayWithDelay(1000));
-                    return;
-                }
-            // Step 1: Check global auto-upload setting
-            if (!autoEnabled) {
-                Log.d(TAG, "⏸️ Global auto-upload is DISABLED - skipping all events");
-                removeNativeOverlayWithDelay(1000);
-                return;
-            }
-            
-            Log.d(TAG, "✅ Global auto-upload is ENABLED - proceeding with checks");
-            
-            // Step 2: Check network requirements (WiFi-only setting)
-            if (wifiOnly) {
-                Log.d(TAG, "📶 WiFi-only mode enabled - checking network connection...");
-                
-                NetworkDetectionResult networkResult = detectNetworkType();
-                Log.d(TAG, "📶 Network analysis: " + networkResult.toString());
-                
-                if (!networkResult.isWiFi) {
-                    Log.d(TAG, "📶 WiFi-only enabled but not on WiFi (" + networkResult.primaryType + ") - skipping");
-                    removeNativeOverlayWithDelay(1000);
-                    return;
-                }
-            }
-            
-            Log.d(TAG, "📶 Network requirements satisfied - proceeding");
-            
-            // Step 3: Get user events
-            Log.d(TAG, "🔍 Fetching user events for auto-upload check...");
-            
-            // Get Supabase access token with shorter timeout and fallback
-            String accessToken = getSupabaseAccessTokenQuick();
-            if (accessToken == null) {
-                Log.e(TAG, "❌ Failed to get Supabase access token");
-                removeNativeOverlayWithDelay(2000);
-                return;
-            }
-            
-            Log.d(TAG, "✅ Got access token, fetching user events...");
-            
-            // Fetch events using real API
-            String eventsJson = apiClient.getUserEvents(userId, accessToken);
-            JSONObject responseObj = new JSONObject(eventsJson);
-            JSONArray events = responseObj.getJSONArray("events");
-            
-            Log.d(TAG, "📅 Found " + events.length() + " events for user");
-            
-            // Process all events (global auto-upload enabled)
-            int eventsWithAutoUpload = events.length();
-            
-            Log.d(TAG, "📊 Processing all events (global auto-upload enabled): " + eventsWithAutoUpload);
-            Log.d(TAG, "✅ Auto-upload check completed successfully");
-            
-            // Remove overlay after success
-            new Handler(Looper.getMainLooper()).post(() -> removeNativeOverlayWithDelay(1000));
-            
             } catch (Exception e) {
                 Log.e(TAG, "❌ Internal auto-upload check failed: " + e.getMessage(), e);
                 new Handler(Looper.getMainLooper()).post(() -> removeNativeOverlayWithDelay(2000));
@@ -2317,16 +2348,18 @@ public class MultiEventAutoUploadPlugin extends Plugin {
         // CRITICAL: Move Permission Gate check to background thread to prevent ANR
         java.util.concurrent.CompletableFuture.runAsync(() -> {
             try {
-                // CRITICAL: Check Permission Gate in background thread
-                if (!checkPermissionGateWithRetry()) {
-                    Log.d(TAG, "⛔ Internal auto-upload (with token) blocked by Permission Gate - user needs to complete onboarding");
-                    new Handler(Looper.getMainLooper()).post(() -> removeNativeOverlayWithDelay(1000));
-                    return;
-                }
-                
-                // Continue with internal check on main thread
-                new Handler(Looper.getMainLooper()).post(() -> {
-                    continueInternalCheckWithToken(userId, autoEnabled, wifiOnly, backgroundEnabled, accessToken);
+                // CRITICAL: Check Permission Gate asynchronously to prevent blocking
+                checkPermissionGateAsync(allowed -> {
+                    if (!allowed) {
+                        Log.d(TAG, "⛔ Internal auto-upload (with token) blocked by Permission Gate - user needs to complete onboarding");
+                        new Handler(Looper.getMainLooper()).post(() -> removeNativeOverlayWithDelay(1000));
+                        return;
+                    }
+                    
+                    // Continue with internal check on main thread
+                    new Handler(Looper.getMainLooper()).post(() -> {
+                        continueInternalCheckWithToken(userId, autoEnabled, wifiOnly, backgroundEnabled, accessToken);
+                    });
                 });
             } catch (Exception e) {
                 Log.e(TAG, "❌ Error checking Permission Gate in internal flow: " + e.getMessage(), e);
@@ -2466,8 +2499,8 @@ public class MultiEventAutoUploadPlugin extends Plugin {
                     break;
                 }
                 
-                // Scan this individual event for photos
-                List<PhotoToUpload> photosToUpload = scanSingleEventForPhotos(event, accessToken);
+                // Scan this individual event for photos (async to prevent ANR)
+                List<PhotoToUpload> photosToUpload = scanSingleEventForPhotosWithCallback(event, accessToken);
                 int newPhotosCount = photosToUpload.size();
                 
                 Log.d(TAG, "📊 Event '" + eventName + "': " + newPhotosCount + " new photos found");
@@ -2507,7 +2540,83 @@ public class MultiEventAutoUploadPlugin extends Plugin {
     }
     
     /**
-     * Scan a single event for photos that need uploading
+     * Scan a single event for photos with async photo scanning to prevent ANR
+     * Uses CountDownLatch to wait for async photo scanning to complete
+     */
+    private List<PhotoToUpload> scanSingleEventForPhotosWithCallback(JSONObject event, String accessToken) {
+        try {
+            String eventId = event.getString("event_id");
+            String eventName = event.getString("name");
+            
+            Log.d(TAG, "📸 Scanning photos for event: " + eventName);
+            
+            // Step 1: Get uploaded photos for duplicate detection
+            String uploadedPhotosJson = apiClient.getUploadedPhotos(eventId, accessToken);
+            JSONObject uploadedPhotosObj = new JSONObject(uploadedPhotosJson);
+            JSONArray uploadedHashes = uploadedPhotosObj.getJSONArray("uploadedHashes");
+            int uploadedCount = uploadedPhotosObj.getInt("count");
+            
+            Log.d(TAG, "🔍 Found " + uploadedCount + " uploaded photos for " + eventName);
+            
+            // Step 2: Create hash map for duplicate detection  
+            java.util.Set<String> photoHashMap = new java.util.HashSet<>();
+            for (int i = 0; i < uploadedHashes.length(); i++) {
+                String hashEntry = uploadedHashes.getString(i);
+                // Extract just the hash part (before the first underscore)
+                String fileHash = hashEntry.split("_")[0];
+                if (fileHash != null && !fileHash.isEmpty()) {
+                    photoHashMap.add(fileHash);
+                }
+            }
+            
+            Log.d(TAG, "🗺️ Created hash map with " + photoHashMap.size() + " hashes for duplicate detection");
+            
+            // Step 3: Scan device photos in date range (ASYNC VERSION with sync wait) 
+            String startTime = event.optString("start_time", "");
+            String endTime = event.optString("end_time", "");
+            
+            Log.d(TAG, "📅 Event date range: " + startTime + " to " + endTime);
+            
+            // Use CountDownLatch to wait for async photo scanning
+            final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+            final java.util.concurrent.atomic.AtomicReference<List<PhotoToUpload>> resultRef = new java.util.concurrent.atomic.AtomicReference<>();
+            
+            // Scan device photos with async method to prevent ANR
+            scanDevicePhotosForEventAsync(eventId, startTime, endTime, photoHashMap, eventName, photos -> {
+                resultRef.set(photos);
+                latch.countDown();
+            });
+            
+            // Wait for async photo scanning to complete (with timeout)
+            try {
+                boolean completed = latch.await(30, java.util.concurrent.TimeUnit.SECONDS);
+                if (!completed) {
+                    Log.w(TAG, "⚠️ Photo scanning timeout for " + eventName);
+                    return new ArrayList<>();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                Log.e(TAG, "❌ Photo scanning interrupted for " + eventName);
+                return new ArrayList<>();
+            }
+            
+            List<PhotoToUpload> photosToUpload = resultRef.get();
+            if (photosToUpload == null) {
+                photosToUpload = new ArrayList<>();
+            }
+            
+            Log.d(TAG, "📸 Scan complete for '" + eventName + "': " + photosToUpload.size() + " new photos found");
+            
+            return photosToUpload;
+            
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Failed to scan event for photos: " + e.getMessage(), e);
+            return new ArrayList<>();
+        }
+    }
+
+    /**
+     * Scan a single event for photos that need uploading (DEPRECATED - use scanSingleEventForPhotosWithCallback)
      * Returns list of photos that need to be uploaded
      */
     private List<PhotoToUpload> scanSingleEventForPhotos(JSONObject event, String accessToken) {
@@ -2545,7 +2654,7 @@ public class MultiEventAutoUploadPlugin extends Plugin {
             Log.d(TAG, "📅 Event date range: " + startTime + " to " + endTime);
             
             // Scan device photos with date filtering and duplicate detection
-            List<PhotoToUpload> photosToUpload = scanDevicePhotosForEvent(eventId, startTime, endTime, photoHashMap, eventName);
+            List<PhotoToUpload> photosToUpload = scanDevicePhotosForEventInternal(eventId, startTime, endTime, photoHashMap, eventName);
             
             Log.d(TAG, "📸 Scan complete for '" + eventName + "': " + photosToUpload.size() + " new photos found");
             
@@ -2562,6 +2671,116 @@ public class MultiEventAutoUploadPlugin extends Plugin {
      * Since we already verified auth state, reads access token directly
      * @return Access token or null if not available
      */
+    /**
+     * Async version of token retrieval to prevent UI blocking
+     */
+    private void getSupabaseAccessTokenAsync(TokenCallback callback) {
+        try {
+            Log.d(TAG, "🔍 Getting Supabase access token from localStorage (async)...");
+            long startTime = System.currentTimeMillis();
+            Log.d(TAG, "⏱️ Starting async token retrieval at: " + startTime);
+            
+            // Execute JavaScript to read access token from localStorage on main thread
+            new Handler(Looper.getMainLooper()).post(() -> {
+                try {
+                    String tokenReadJs = 
+                        "(function(){" +
+                            "try {" +
+                                "console.log('🔍 Reading Supabase access token from localStorage...');" +
+                                
+                                "var sbAuthToken = localStorage.getItem('sb-jgfcfdlfcnmaripgpepl-auth-token');" +
+                                "if (sbAuthToken) {" +
+                                    "try {" +
+                                        "var authData = JSON.parse(sbAuthToken);" +
+                                        "var accessToken = authData && authData.access_token;" +
+                                        "if (accessToken) {" +
+                                            "console.log('✅ Found Supabase access token, length:', accessToken.length);" +
+                                            "return 'TOKEN:' + accessToken;" +
+                                        "} else {" +
+                                            "console.error('❌ No access token in auth data');" +
+                                            "return 'NO_ACCESS_TOKEN';" +
+                                        "}" +
+                                    "} catch(parseError) {" +
+                                        "console.error('❌ Failed to parse auth token:', parseError);" +
+                                        "return 'PARSE_ERROR';" +
+                                    "}" +
+                                "} else {" +
+                                    "console.error('❌ No Supabase auth token in localStorage');" +
+                                    "return 'NO_AUTH_TOKEN';" +
+                                "}" +
+                            "} catch(error) {" +
+                                "console.error('❌ Access token read error:', error);" +
+                                "return 'ERROR:' + error.message;" +
+                            "}" +
+                        "})()";
+                    
+                    // Use atomic boolean to prevent multiple callback calls
+                    final java.util.concurrent.atomic.AtomicBoolean callbackCalled = new java.util.concurrent.atomic.AtomicBoolean(false);
+                    
+                    getBridge().getWebView().evaluateJavascript(tokenReadJs, result -> {
+                        if (callbackCalled.compareAndSet(false, true)) {
+                            Log.d(TAG, "📞 JavaScript callback received at: " + System.currentTimeMillis());
+                            Log.d(TAG, "📞 Access token read result: " + (result != null && result.contains("TOKEN:") ? "TOKEN FOUND" : result));
+                            
+                            if (result != null && result.contains("TOKEN:")) {
+                                String accessToken = result.replace("\"", "").substring(6); // Remove "TOKEN:" prefix and quotes
+                                Log.d(TAG, "✅ Successfully read access token: " + accessToken.length() + " characters");
+                                callback.onSuccess(accessToken);
+                            } else {
+                                Log.e(TAG, "❌ Failed to read access token: " + result);
+                                callback.onSuccess(null);
+                            }
+                        }
+                    });
+                    
+                    // Add timeout handler to prevent hanging
+                    new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                        if (callbackCalled.compareAndSet(false, true)) {
+                            Log.w(TAG, "⚠️ Token retrieval timeout after 5 seconds");
+                            callback.onSuccess(null);
+                        }
+                    }, 5000); // Reduced timeout to 5 seconds for faster response
+                    
+                } catch (Exception e) {
+                    Log.e(TAG, "❌ Error executing async access token read: " + e.getMessage(), e);
+                    callback.onSuccess(null);
+                }
+            });
+            
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error in async token retrieval: " + e.getMessage(), e);
+            callback.onSuccess(null);
+        }
+    }
+    
+    /**
+     * Callback interface for async token retrieval
+     */
+    private interface TokenCallback {
+        void onSuccess(String token);
+    }
+    
+    /**
+     * Callback interface for async photo scanning
+     */
+    private interface PhotoScanCallback {
+        void onScanComplete(List<PhotoToUpload> photos);
+    }
+    
+    /**
+     * Callback interface for async permission gate check
+     */
+    private interface PermissionGateCallback {
+        void onResult(boolean allowed);
+    }
+    
+    /**
+     * Callback interface for async wifi-only settings check
+     */
+    private interface WifiOnlySettingsCallback {
+        void onResult(boolean wifiOnly);
+    }
+
     private String getSupabaseAccessTokenQuick() {
         try {
             Log.d(TAG, "🔍 Getting Supabase access token from localStorage...");
@@ -2699,15 +2918,27 @@ public class MultiEventAutoUploadPlugin extends Plugin {
     }
     
     /**
-     * Scan device photos for a specific event date range
+     * Scan device photos for a specific event date range (ASYNC VERSION)
      * @param eventId Event ID for tracking
      * @param startTime Event start time in ISO format (2024-08-18T10:00:00Z)
      * @param endTime Event end time in ISO format (2024-08-18T18:00:00Z)
      * @param uploadedHashes Set of already uploaded photo hashes for duplicate detection
      * @param eventName Event name for logging
-     * @return List of photos that need to be uploaded
+     * @param callback Callback to receive results
      */
-    private List<PhotoToUpload> scanDevicePhotosForEvent(String eventId, String startTime, String endTime, java.util.Set<String> uploadedHashes, String eventName) {
+    private void scanDevicePhotosForEventAsync(String eventId, String startTime, String endTime, java.util.Set<String> uploadedHashes, String eventName, PhotoScanCallback callback) {
+        // Move intensive photo scanning to background thread to prevent ANR
+        java.util.concurrent.CompletableFuture.runAsync(() -> {
+            List<PhotoToUpload> photosToUpload = scanDevicePhotosForEventInternal(eventId, startTime, endTime, uploadedHashes, eventName);
+            // Post results back to main thread
+            new Handler(Looper.getMainLooper()).post(() -> callback.onScanComplete(photosToUpload));
+        });
+    }
+    
+    /**
+     * Internal synchronous photo scanning (runs on background thread)
+     */
+    private List<PhotoToUpload> scanDevicePhotosForEventInternal(String eventId, String startTime, String endTime, java.util.Set<String> uploadedHashes, String eventName) {
         try {
             Log.d(TAG, "📸 Starting device photo scan for " + eventName);
             
@@ -3194,6 +3425,148 @@ public class MultiEventAutoUploadPlugin extends Plugin {
         
         Log.w(TAG, "❌ Permission Gate check failed after " + maxRetries + " attempts - blocking auto-upload");
         return false;
+    }
+    
+    /**
+     * Async version of Permission Gate check to prevent blocking
+     */
+    private void checkPermissionGateAsync(PermissionGateCallback callback) {
+        checkPermissionGateAsyncWithRetry(callback, 1, 10);
+    }
+    
+    /**
+     * Async Permission Gate check with retry logic
+     */
+    private void checkPermissionGateAsyncWithRetry(PermissionGateCallback callback, int attempt, int maxRetries) {
+        Log.d(TAG, "🔍 Async Permission Gate check attempt " + attempt + "/" + maxRetries);
+        
+        checkPermissionGateSingleAsync(allowed -> {
+            if (allowed) {
+                Log.d(TAG, "✅ Permission Gate allows auto-upload on attempt " + attempt);
+                callback.onResult(true);
+                return;
+            }
+            
+            // If not allowed and we have retries left, retry after delay
+            if (attempt < maxRetries) {
+                Log.d(TAG, "⏳ Retrying async Permission Gate check in 500ms...");
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    checkPermissionGateAsyncWithRetry(callback, attempt + 1, maxRetries);
+                }, 500);
+            } else {
+                Log.w(TAG, "❌ Async Permission Gate check failed after " + maxRetries + " attempts - blocking auto-upload");
+                callback.onResult(false);
+            }
+        });
+    }
+    
+    /**
+     * Single async Permission Gate check (no retry)
+     */
+    private void checkPermissionGateSingleAsync(PermissionGateCallback callback) {
+        try {
+            Log.d(TAG, "🔍 Checking Permission Gate state (async)...");
+            
+            String checkScript = 
+                "(function() {" +
+                "  try {" +
+                "    console.log('🤖 NATIVE: Starting Permission Gate check...');" +
+                "    " +
+                "    // Check immediate blocking flags first" +
+                "    if (window.PhotoShareAutoUploadBlocked === true) {" +
+                "      console.log('⛔ NATIVE: PhotoShareAutoUploadBlocked=true, blocking auto-upload');" +
+                "      return JSON.stringify({ blocked: true, reason: 'auto_upload_blocked' });" +
+                "    }" +
+                "    " +
+                "    // Check PhotoSharePermissionGate state" +
+                "    const gate = window.PhotoSharePermissionGate;" +
+                "    if (!gate) {" +
+                "      console.log('⚠️ NATIVE: PhotoSharePermissionGate not found');" +
+                "      return JSON.stringify({ blocked: false, reason: 'gate_not_found' });" +
+                "    }" +
+                "    " +
+                "    console.log('🤖 NATIVE: Gate object found:', JSON.stringify(gate));" +
+                "    " +
+                "    // If still checking, return not ready" +
+                "    if (gate.reason === 'checking') {" +
+                "      console.log('⏳ NATIVE: Permission gate still checking, returning not ready');" +
+                "      return JSON.stringify({ blocked: false, reason: 'not_ready' });" +
+                "    }" +
+                "    " +
+                "    // Gate has determined state" +
+                "    console.log('🤖 NATIVE: Using gate state:', gate.blocked, gate.reason);" +
+                "    return JSON.stringify({" +
+                "      blocked: gate.blocked," +
+                "      reason: gate.reason," +
+                "      timestamp: gate.timestamp" +
+                "    });" +
+                "    " +
+                "  } catch(e) {" +
+                "    console.log('❌ NATIVE: Permission Gate check error:', e.message);" +
+                "    return JSON.stringify({ blocked: false, reason: 'error', error: e.message });" +
+                "  }" +
+                "})();";
+            
+            // Run on UI thread for WebView operations (async approach)
+            new Handler(Looper.getMainLooper()).post(() -> {
+                try {
+                    if (getBridge() != null && getBridge().getWebView() != null) {
+                        Log.d(TAG, "🔍 Evaluating Permission Gate JavaScript (async)...");
+                        getBridge().getWebView().evaluateJavascript(checkScript, value -> {
+                            String cleanValue = value != null ? value.replace("\"", "") : "ERROR";
+                            Log.d(TAG, "🔍 Async Permission Gate JavaScript returned: " + cleanValue);
+                            
+                            // Parse JSON result (copied from blocking version)
+                            boolean allowed = true; // Default to allow
+                            try {
+                                if (cleanValue != null && cleanValue.startsWith("{")) {
+                                    JSONObject json = new JSONObject(cleanValue);
+                                    boolean blocked = json.optBoolean("blocked", false);
+                                    String reason = json.optString("reason", "unknown");
+                                    
+                                    Log.d(TAG, "🔍 Parsed async Permission Gate: blocked=" + blocked + ", reason=" + reason);
+                                    
+                                    if (blocked) {
+                                        Log.d(TAG, "⛔ Permission Gate blocks auto-upload: " + reason);
+                                        allowed = false;
+                                    } else if ("not_ready".equals(reason)) {
+                                        Log.d(TAG, "⏳ Permission Gate not ready, will retry");
+                                        allowed = false;
+                                    } else {
+                                        Log.d(TAG, "✅ Permission Gate allows auto-upload: " + reason);
+                                        allowed = true;
+                                    }
+                                } else {
+                                    // Legacy string result or null
+                                    if ("BLOCKED".equals(cleanValue)) {
+                                        Log.d(TAG, "⛔ Permission Gate blocks auto-upload (legacy)");
+                                        allowed = false;
+                                    } else {
+                                        Log.w(TAG, "⚠️ Permission Gate state unknown (" + cleanValue + "), allowing auto-upload");
+                                        allowed = true;
+                                    }
+                                }
+                            } catch (Exception parseError) {
+                                Log.w(TAG, "❌ Error parsing async Permission Gate result: " + parseError.getMessage());
+                                allowed = true; // On parse error, allow for backward compatibility
+                            }
+                            
+                            callback.onResult(allowed);
+                        });
+                    } else {
+                        Log.w(TAG, "⚠️ WebView not available for Permission Gate check");
+                        callback.onResult(false);
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "❌ Error in async Permission Gate JavaScript evaluation: " + e.getMessage(), e);
+                    callback.onResult(false);
+                }
+            });
+            
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error in async Permission Gate check: " + e.getMessage(), e);
+            callback.onResult(false);
+        }
     }
 
     /**

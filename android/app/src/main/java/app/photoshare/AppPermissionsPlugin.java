@@ -783,4 +783,42 @@ public class AppPermissionsPlugin extends Plugin {
             return false;
         }
     }
+
+    @PluginMethod
+    public void requestFullPhotoAccess(PluginCall call) {
+        Log.d(TAG, "🖼️ AppPermissions: Android requestFullPhotoAccess called");
+        
+        // On Android, there's no "limited" access concept like iOS
+        // So we just check if photo permission is already granted
+        String alias = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ? "photos_modern" : "photos_legacy";
+        PermissionState state = getPermissionState(alias);
+        
+        JSObject result = new JSObject();
+        
+        if (state == PermissionState.GRANTED) {
+            Log.d(TAG, "✅ AppPermissions: Android already has full photo access");
+            result.put("granted", true);
+            result.put("status", "granted");
+            result.put("message", "Full photo access already granted");
+        } else {
+            Log.d(TAG, "❌ AppPermissions: Android photo access not granted - directing to settings");
+            result.put("granted", false);
+            result.put("status", "denied");
+            result.put("message", "Photo access required. Please enable in Settings > Apps > PhotoShare > Permissions > Photos and media.");
+            
+            // Optionally open app settings
+            try {
+                Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                Uri uri = Uri.fromParts("package", getContext().getPackageName(), null);
+                intent.setData(uri);
+                getActivity().startActivity(intent);
+                result.put("settingsOpened", true);
+            } catch (Exception e) {
+                Log.e(TAG, "❌ Failed to open app settings", e);
+                result.put("settingsOpened", false);
+            }
+        }
+        
+        call.resolve(result);
+    }
 }
